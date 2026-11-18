@@ -367,6 +367,7 @@ table.wb .hin{width:70px;height:24px;background:var(--bg);border:1px solid var(-
 table.wb select{height:24px;max-width:190px;background:var(--bg);border:1px solid var(--line);border-radius:4px;color:var(--text);font-size:11.5px} table.wb select.opt{max-width:78px;margin-left:3px}
 table.qty.runq td:nth-child(n+3){text-align:right;font-family:var(--mono)} table.qty.runq td:first-child{color:var(--muted)}
 table.wb td.ori{font-family:var(--font);font-size:11.5px;color:var(--muted)}
+table.wb .hin.over{border-color:#ff8a65;color:#ff8a65}
 table.wb .dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px;vertical-align:middle}
 .wbsum{margin-top:8px} .wbtot{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12.5px;padding:8px 10px;background:var(--panel2);border-radius:6px}
 .wbtot div{display:flex;gap:8px;align-items:baseline} .wbtot span{color:var(--muted)} .wbtot b{font-family:var(--mono)} .wbtot .hl b{color:var(--accent);font-size:14px}
@@ -400,7 +401,7 @@ header .grp{border-right:1px solid var(--line)} header .grp:last-child{border-ri
 .modeseg button{height:44px !important} .modeseg .lbl{display:inline !important}
 #bScale{height:34px}
 @media (max-width:1400px){ header .tb:not(.pg-arrow){min-width:40px;padding:2px 4px} header .tb .lbl{font-size:10px} .brand span{display:none !important} }
-@media (max-width:820px){ header .tb:not(.pg-arrow){height:46px;min-width:44px;padding:2px 4px} header .tb .lbl{font-size:9.5px} header .tb svg{width:19px;height:19px} .modeseg button{height:40px !important} }
+@media (max-width:820px){ header .tb:not(.pg-arrow){height:46px;min-width:44px;padding:2px 4px} header .tb .lbl{font-size:10.5px} header .tb svg{width:19px;height:19px} .modeseg button{height:40px !important} }
 
 .hbreak{display:none}
 @media (min-width:821px){
@@ -421,6 +422,32 @@ header .grp{border-right:1px solid var(--line)} header .grp:last-child{border-ri
   header>.rightgrp.more-r,#row2.more-r{-webkit-mask-image:linear-gradient(to right,#000 82%,transparent);mask-image:linear-gradient(to right,#000 82%,transparent)}
   header>.rightgrp.more-l,#row2.more-l{-webkit-mask-image:linear-gradient(to left,#000 82%,transparent);mask-image:linear-gradient(to left,#000 82%,transparent)}
   header>.rightgrp.more-l.more-r,#row2.more-l.more-r{-webkit-mask-image:linear-gradient(to right,transparent,#000 14%,#000 86%,transparent);mask-image:linear-gradient(to right,transparent,#000 14%,#000 86%,transparent)}
+}
+
+/* ---- タッチ端末：指・手袋でも押しやすく、入力時にiPhoneが勝手に拡大しないように ---- */
+@media (pointer:coarse){
+  input,select,textarea{font-size:16px !important}
+  input[type=checkbox],input[type=radio]{width:22px;height:22px}
+  .mini{min-height:34px;padding:0 10px}
+  .segb button{min-height:34px;min-width:44px}
+  #props .inp,#props select,.wbbar select,.wbbar .inp,table.wb .hin,table.wb select{min-height:38px}
+  #wqbar input,#wqbar select,#wqbar button{height:36px}
+  .dvtop .mini,.dvidx button{min-height:40px}
+  .acts .btn{min-height:42px}
+  #mUndoGrp .tb,#mActGrp .tb{min-width:44px}
+}
+@media (max-width:820px){
+  header .scalebadge{font-size:11.5px;padding:0 8px;height:34px}
+  #mActGrp{border-left:1px solid var(--line);padding-left:4px;margin-left:2px}
+  #row2>.scalegrp{display:flex;align-items:center;padding:0 4px}
+}
+
+@media (max-width:820px){
+  #mUndoGrp{position:absolute;left:max(10px,env(safe-area-inset-left));bottom:84px;display:flex;gap:6px;z-index:5}
+  #mUndoGrp .tb{width:52px;height:50px;border-radius:12px;border:1px solid var(--line);background:#14171ce0;box-shadow:0 4px 14px #0007;flex-direction:column}
+  #mUndoGrp .tb .lbl{display:block !important;font-size:10px;color:var(--muted);line-height:1.1}
+  #mUndoGrp .tb svg{width:18px;height:18px}
+  #app.present #mUndoGrp{display:none}
 }
 </style>
 </head>
@@ -682,10 +709,16 @@ function rawValue(m){ // numeric for export / totals: {len_mm, area_m2}
 }
 
 // ---------- persistence ----------
-function saveLocal(){ if(!S.key) return; try{ localStorage.setItem(S.key, JSON.stringify({meas:S.meas,scales:S.scales,rots:S.rots,idSeq:S.idSeq,schedule:S.schedule,ann:S.ann,bm:S.bm,updatedAt:S.updatedAt})); }catch(e){ S._lsFull=true; } }
+function saveLocal(){ if(!S.key) return;
+  // 端末保存の本体は IndexedDB。localStorage は小さいデータの即時控えだけ（大きいと毎回の保存が重くなるため）
+  if (S._lsBig && Date.now()-S._lsBig<60000) return;
+  try{ const j=JSON.stringify({meas:S.meas,scales:S.scales,rots:S.rots,idSeq:S.idSeq,schedule:S.schedule,ann:S.ann,bm:S.bm,updatedAt:S.updatedAt});
+    if (j.length>1.5e6){ S._lsBig=Date.now(); try{ localStorage.removeItem(S.key); }catch(e){} return; } S._lsBig=0; localStorage.setItem(S.key, j); }catch(e){ S._lsFull=true; } }
 function save(){ S.updatedAt=Date.now(); saveLocal(); scheduleSave(); if (typeof cloudMark==='function') cloudMark(); }
-function load(){ try{ const j=JSON.parse(localStorage.getItem(S.key)||'null'); if(j){ S.meas=j.meas||{}; S.scales=j.scales||{}; S.rots=j.rots||{}; S.idSeq=j.idSeq||1; S.schedule=j.schedule||{}; S.ann=j.ann||{}; S.bm=j.bm||{}; S.updatedAt=j.updatedAt||0; return true; } }catch(e){} return false; }
-function pushUndo(){ S.undo.push(JSON.stringify({meas:S.meas,scales:S.scales,ann:S.ann})); if(S.undo.length>80) S.undo.shift(); S.redo=[]; }
+function load(){ try{ const j=JSON.parse(localStorage.getItem(S.key)||'null'); if(j){ applyLoaded(j); return true; } }catch(e){} return false; }
+const UNDO_MAX_BYTES=48e6;   // 元に戻すの保持量の上限（書き込みが多い図面でメモリを使い切らないように）
+function capStack(st){ let t=0; for (let i=st.length-1;i>=0;i--){ t+=st[i].length*2; if (t>UNDO_MAX_BYTES && i<st.length-1){ st.splice(0,i+1); break; } } }
+function pushUndo(){ S.undo.push(JSON.stringify({meas:S.meas,scales:S.scales,ann:S.ann})); if(S.undo.length>80) S.undo.shift(); capStack(S.undo); S.redo=[]; }
 function undo(){
   if (S.draft && S.draft.pts.length){ S.draft.pts.pop(); if(!S.draft.pts.length) S.draft=null; drawOv(); return; }
   const u=S.undo.pop(); if(!u){ toast('これ以上戻せません'); return; }
@@ -701,35 +734,59 @@ class JaCMapFactory{ constructor(){ } async fetch({name}){ const all=await loadJ
     if (!b){ const r=await fetch(CMAP_CDN+name+'.bcmap'); if (!r.ok) throw new Error('CMap not available: '+name); return {cMapData:new Uint8Array(await r.arrayBuffer()), compressionType:1}; } const bin=atob(b); const u=new Uint8Array(bin.length); for (let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return {cMapData:u, compressionType:1}; } }
 // ---------- loading ----------
 async function openFile(f, opts={}){
-  if (!f) return; if (S.key){ flushAll(); } AS.resuming=true;
+  if (!f) return;
+  // 先に中身を確かめる（開けないファイルで今の図面を閉じてしまわない）
+  let pre;
+  try{ pre = await preloadFile(f); }catch(e){ console.error(e); try{ localStorage.removeItem('pdfmeasure:resumeGuard'); }catch(_){} if (opts.resume) renderRecentCard(); busy(''); toast('開けませんでした：'+fileErrMsg(e)); return; }
+  if (S.key){ flushAll(); } AS.resuming=true;
   S.name=f.name; S.key='pdfmeasure:'+f.name+':'+f.size;
   S.meas={}; S.scales={}; S.rots={}; S.detect={}; S.schedule={}; S.marks={}; S.texts=null; S.markInfo=null; S.openPick=null; S.undo=[]; S.redo=[]; S.ann={}; S.bm={}; S.updatedAt=0; S.outline=null; S.vtexts={}; S.stexts={}; S.links=[]; S.pdfBytes=null; clearSel(); IMGC.clear(); S.sel=null; S.draft=null; S.geo=null; S.geoPage=0; S.idSeq=1;
   const restored = await loadState();
+  // 端末ごとに重ならない番号から採番（PCとiPhoneで同時に追加しても同じIDにならない）
+  S.idSeq = Math.max(S.idSeq||1, Math.floor(Date.now()/1000)*1000 + Math.floor(Math.random()*1000));
   $('#drop').style.display='none';
   busy('読み込み中…');
   try{
-    if (f.type==='application/pdf' || /\.pdf$/i.test(f.name)){
-      if (!pdfjsLib) throw new Error('PDFライブラリを読み込めませんでした');
-      const buf = await f.arrayBuffer(); S.pdfBytes=buf.slice(0);
-      S.doc = await pdfjsLib.getDocument({data:buf, isEvalSupported:false, CMapReaderFactory:JaCMapFactory, cMapUrl:'ja/', cMapPacked:true, useSystemFonts:true}).promise;
-      S.isPdf=true; S.img=null; S.nPages=S.doc.numPages;
-    } else {
-      const url = URL.createObjectURL(f);
-      const img = new Image(); img.src=url; await img.decode();
-      S.img=img; S.doc=null; S.isPdf=false; S.nPages=1;
-    }
+    if (pre.doc){ if (S.doc && S.doc!==pre.doc) try{ S.doc.destroy(); }catch(e){} S.pdfBytes=pre.bytes; S.doc=pre.doc; S.isPdf=true; S.img=null; S.nPages=S.doc.numPages; S.encrypted=pre.encrypted; }
+    else { S.img=pre.img; S.doc=null; S.isPdf=false; S.nPages=1; S.encrypted=false; }
     $('#pgn').textContent='/ '+S.nPages; buildThumbs();
     await gotoPage(1, true);
     storeFile(f);
-    const v = await restoreView(); AS.resuming=false; AS.lastSnapHash=''; snapshot('ファイルを開いた時点'); saveSession(); setSaveSt(AS.lastSaved? 'ok' : 'idle');
+    const v = await restoreView(); AS.resuming=false; try{ localStorage.removeItem('pdfmeasure:resumeGuard'); }catch(e){} AS.lastSnapHash=''; snapshot('ファイルを開いた時点'); saveSession(); setSaveSt(AS.lastSaved? 'ok' : 'idle');
     setTimeout(()=>scanOpenings().catch(e=>console.warn('scan',e)), 400);
     if (CLOUD.on) cloudPull(); refreshBmBtn(); if (S.leftTab==='bm') renderBm();
     busy('');
     if (opts.resume) toast(`前回の作業を復元しました（${S.page}ページ・計測${Object.values(S.meas).reduce((a,b)=>a+b.length,0)}件・書込${Object.values(S.ann).reduce((a,b)=>a+b.length,0)}件）`);
     else if (restored) toast(v? `前回の続きから表示しました（${S.page}ページ）` : '前回の計測データを復元しました');
-  }catch(e){ console.error(e); busy(''); AS.resuming=false; toast('読み込み失敗: '+e.message); $('#drop').style.display=''; }
+  }catch(e){ console.error(e); busy(''); AS.resuming=false; try{ localStorage.removeItem('pdfmeasure:resumeGuard'); }catch(_){} toast('読み込み失敗: '+e.message); $('#drop').style.display=''; }
 }
 
+const PDF_OPTS={isEvalSupported:false, CMapReaderFactory:JaCMapFactory, cMapUrl:'ja/', cMapPacked:true, useSystemFonts:true, enableXfa:false};
+function fileErrMsg(e){ const n=e&&e.name, m=(e&&e.message)||String(e);
+  if (n==='PasswordException') return 'パスワードが違うか、入力が取り消されました';
+  if (n==='InvalidPDFException'||/Invalid PDF/i.test(m)) return 'PDFが壊れているか、PDFではありません';
+  if (/decode/i.test(m)) return '画像として読み込めない形式です（PDF・PNG・JPEGに対応）';
+  return m; }
+async function preloadFile(f){
+  const isPdf = f.type==='application/pdf' || /\.pdf$/i.test(f.name);
+  if (isPdf){
+    if (!window.pdfjsLib) throw new Error('PDFライブラリを読み込めませんでした（通信環境を確認してください）');
+    if (f.size>300*1024*1024) throw new Error('ファイルが大きすぎます（300MBまで）');
+    const buf=await f.arrayBuffer(); const bytes=buf.slice(0);
+    const task=pdfjsLib.getDocument({...PDF_OPTS, data:buf});
+    let tries=0; task.onPassword=(update, reason)=>{ tries++; if (tries>3){ task.destroy(); return; }
+      const pw=prompt((reason===2? 'パスワードが違います。' : 'このPDFはパスワードで保護されています。')+'\nパスワードを入力してください（'+f.name+'）'); if (pw==null){ task.destroy(); return; } update(pw); };
+    const doc=await task.promise; let encrypted=false;
+    try{ const md=await doc.getMetadata(); encrypted=!!(md && md.info && md.info.EncryptFilterName); }catch(e){}
+    if (!encrypted) encrypted = /\/Encrypt\s/.test(new TextDecoder('latin1').decode(new Uint8Array(bytes, Math.max(0,bytes.byteLength-4096))));
+    if (!doc.numPages) throw new Error('ページがありません');
+    return {doc, bytes, encrypted};
+  }
+  if (!/^image\//.test(f.type) && !/\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name)) throw new Error('対応していない形式です（PDF・PNG・JPEG）');
+  const url=URL.createObjectURL(f); const img=new Image(); img.src=url; await img.decode();
+  if (!img.naturalWidth || !img.naturalHeight) throw new Error('画像の大きさを読み取れません');
+  return {img};
+}
 let pageToken=0;
 // ---------- ページ一覧（サムネイル） ----------
 const TH={canvases:{}, queue:[], busy:false, obs:null, token:0};
@@ -756,7 +813,7 @@ async function pumpThumbs(){
       const c=document.createElement('canvas'); const tw=Math.round(260*Math.min(2,window.devicePixelRatio||1)/2*2);
       if (S.isPdf){ const page=await S.doc.getPage(n); if (tok!==TH.token) return; const v1=page.getViewport({scale:1}); const sc=tw/v1.width; const vp=page.getViewport({scale:sc});
         c.width=Math.ceil(vp.width); c.height=Math.ceil(vp.height); const cx=c.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,c.width,c.height);
-        await page.render({canvasContext:cx, viewport:vp}).promise; }
+        await page.render({canvasContext:cx, viewport:vp}).promise; if (n!==S.page) try{ page.cleanup(); }catch(e){} }
       else if (S.img){ const sc=tw/S.img.naturalWidth; c.width=tw; c.height=Math.round(S.img.naturalHeight*sc); c.getContext('2d').drawImage(S.img,0,0,c.width,c.height); }
       if (tok!==TH.token) return;
       c.dataset.r=-1; TH.canvases[n]=c; applyThumbRot(n);
@@ -859,8 +916,14 @@ function buildIndex(segs, pts, curves){
   const cell=(x,y)=>{ let i=Math.floor(x/cs)+1, j=Math.floor(y/cs)+1; i=i<0?0:i>=gx?gx-1:i; j=j<0?0:j>=gy?gy-1:j; return [i,j]; };
   const grid=new Map();
   const put=(k,v)=>{ let a=grid.get(k); if(!a) grid.set(k,a=[]); a.push(v); };
+  const M=Math.max(W,H)*0.05;
+  // ページの外まで延びる線は、ページ範囲に切り詰めてから索引に入れる（極端に長い線で固まらないように）
+  const clip=(x1,y1,x2,y2)=>{ let t0=0,t1=1; const dx=x2-x1, dy=y2-y1;
+    for (const [p,q] of [[-dx,x1+M],[dx,W+M-x1],[-dy,y1+M],[dy,H+M-y1]]){ if (p===0){ if (q<0) return null; continue; } const r=q/p; if (p<0){ if (r>t1) return null; if (r>t0) t0=r; } else { if (r<t0) return null; if (r<t1) t1=r; } }
+    return [x1+dx*t0, y1+dy*t0, x1+dx*t1, y1+dy*t1]; };
   for (let s=0;s<N;s++){
-    const x1=segs[s*4],y1=segs[s*4+1],x2=segs[s*4+2],y2=segs[s*4+3];
+    const c0=clip(segs[s*4],segs[s*4+1],segs[s*4+2],segs[s*4+3]); if (!c0 || !c0.every(Number.isFinite)) continue;
+    const [x1,y1,x2,y2]=c0;
     const [i0,j0]=cell(Math.min(x1,x2),Math.min(y1,y2)), [i1,j1]=cell(Math.max(x1,x2),Math.max(y1,y2));
     if ((i1-i0+1)*(j1-j0+1) > 600){ // long diagonal: walk along it
       const n=Math.ceil(Math.hypot(x2-x1,y2-y1)/(cs*0.5)); let last=-1;
@@ -871,7 +934,7 @@ function buildIndex(segs, pts, curves){
   for (let p=0;p<P;p++){ const [i,j]=cell(pts[p*3],pts[p*3+1]); const k=j*gx+i; let a=pgrid.get(k); if(!a) pgrid.set(k,a=[]); a.push(p); }
   const cgrid=new Map(); const NC=curves? curves.length/8 : 0;
   for (let q=0;q<NC;q++){ let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; for (let k=0;k<8;k+=2){ const x=curves[q*8+k], y=curves[q*8+k+1]; if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
-    const [i0,j0]=cell(x0,y0), [i1,j1]=cell(x1,y1); if ((i1-i0+1)*(j1-j0+1)>2500) continue;
+    if (![x0,y0,x1,y1].every(Number.isFinite)) continue; const [i0,j0]=cell(x0,y0), [i1,j1]=cell(x1,y1); if ((i1-i0+1)*(j1-j0+1)>2500) continue;
     for (let j=j0;j<=j1;j++) for (let i=i0;i<=i1;i++){ const k=j*gx+i; let a=cgrid.get(k); if(!a) cgrid.set(k,a=[]); a.push(q); } }
   return {segs, pts, N, P, cs, gx, gy, grid, pgrid, cell, stamp:new Uint32Array(N), stampN:0, curves, NC, cgrid};
 }
@@ -1015,7 +1078,7 @@ function curveShape(i0){
 // ---------- automatic scale detection from PDF text ----------
 const STD_N=[1,2,2.5,3,4,5,6,8,10,15,20,25,30,40,50,60,75,80,100,120,150,200,250,300,400,500,600,750,800,1000,1200,1500,2000,2500,3000,5000,10000];
 const nz = s => s.replace(/[！-～]/g, ch=>String.fromCharCode(ch.charCodeAt(0)-0xFEE0)).replace(/　|\s+/g,'');
-function pagePaper(){ const L=Math.max(S.W,S.H)*PT_MM; let best=null; for (const [k,v] of Object.entries(PAPERS)){ const e=Math.abs(v/L-1); if (e<0.04 && (!best||e<best.e)) best={k,e}; } return best&&best.k; }
+function pagePaper(UU){ const L=Math.max(S.W,S.H)*PT_MM*(UU||1); let best=null; for (const [k,v] of Object.entries(PAPERS)){ const e=Math.abs(v/L-1); if (e<0.04 && (!best||e<best.e)) best={k,e}; } return best&&best.k; }
 async function detectScale(page, vp, geo){
   const tc = await page.getTextContent();
   const T = vp.transform;
@@ -1030,14 +1093,24 @@ async function detectScale(page, vp, geo){
   }
   const RAT=/^\(?1[\/:](\d+(?:\.\d+)?)\)?$/;
   const rightOf=(it, re)=>{ let best=null; for (const j of items){ if (j===it) continue; const vx=j.o.x-it.o.x, vy=j.o.y-it.o.y; const along=vx*it.dx+vy*it.dy, perp=Math.abs(vx*it.ux+vy*it.uy); if (along>0 && along<it.w+12*it.h && perp<0.6*it.h){ const m=j.s.match(re); if (m && (!best||along<best.a)) best={a:along,m,it:j}; } } return best; };
-  const res={paper:{}, notes:[], dims:null, pagePaper:pagePaper()};
+  const UU=+page.userUnit||1;                                   // UserUnit（1単位=1/72インチ×UserUnit）
+  const res={paper:{}, notes:[], bare:new Map(), dims:null, pagePaper:pagePaper(UU)};
+  const PAP=/(?:^|[^A-Z])([AB])-?([0-5])[:=]?1[\/:](\d+(?:\.\d+)?)/gi;        // A1:1/100, A-3 1/100, A3=1/200
+  const PAP2=/1[\/:](\d+(?:\.\d+)?)[(（]?([AB])-?([0-5])(?![0-9])/gi;            // 1/100(A1), 1/100 A3
   for (const it of items){
+    // 用紙つきの縮尺（1つの文字列に複数あってもすべて拾う）
+    { let hit=false, mm;
+      PAP.lastIndex=0; while ((mm=PAP.exec(it.s))){ const k=(mm[1]+mm[2]).toUpperCase(); if (PAPERS[k] && !res.paper[k]){ res.paper[k]=+mm[3]; } hit=true; }
+      PAP2.lastIndex=0; while ((mm=PAP2.exec(it.s))){ const k=(mm[2]+mm[3]).toUpperCase(); if (PAPERS[k] && !res.paper[k]){ res.paper[k]=+mm[1]; } hit=true; }
+      if (hit) continue; }
     // 用紙別縮尺 "A1:1/20" / "A1:" + "1/20"
     let m=it.s.match(/^(?:縮尺|SCALE|S)?[:=]?(A[0-4]|B[0-5])[:=]?(?:1[\/:](\d+(?:\.\d+)?))?$/i);
     if (m){ let N=m[2]?+m[2]:null; if (!N){ const r=rightOf(it, RAT); if (r) N=+r.m[1]; } if (N && !res.paper[m[1].toUpperCase()]) res.paper[m[1].toUpperCase()]=N; continue; }
     // 注記 "S=1/10" "(S=1/10)" "縮尺1/50" "SCALE 1:100"
-    m=it.s.match(/(?:^|[(\[（])(?:S[=:]|SCALE[=:]?|縮尺[=:]?)1[\/:](\d+(?:\.\d+)?)/i);
+    m=it.s.match(/(?:^|[^A-Z0-9])(?:S[=:]?|SCALE[=:]?|縮尺[=:]?)1[\/:](\d+(?:\.\d+)?)/i);
     if (m){ res.notes.push({N:+m[1], raw:it.raw, o:it.o}); continue; }
+    // 単独の「1/100」「1:100」：勾配表記と区別できないので、寸法照合で裏付けが取れたときだけ使う
+    m=it.s.match(/^\(?1[\/:](\d+)\)?$/); if (m && STD_N.includes(+m[1]) && +m[1]>=5){ res.bare.set(+m[1], (res.bare.get(+m[1])||0)+1); continue; }
     if (/^(?:S[=:]|SCALE[=:]?|縮尺[=:]?)$/i.test(it.s)){ const r=rightOf(it, RAT); if (r) res.notes.push({N:+r.m[1], raw:it.raw+' '+r.it.raw, o:it.o}); }
   }
   // 寸法文字と寸法線の照合
@@ -1057,24 +1130,29 @@ async function detectScale(page, vp, geo){
         if (Math.min(t1,t2)>tc || Math.max(t1,t2)<tc) continue;
         const sc=Math.abs(sd+0.3*it.h); if (!best||sc<best.sc) best={sc,L}; } }
       if (!best) continue; n++;
-      const ratio=val/(best.L*PT_MM);
+      const ratio=val/(best.L*PT_MM*UU);
       const N=STD_N.find(N=>Math.abs(ratio/N-1)<0.02); if (N){ matched++; votes.set(N,(votes.get(N)||0)+1); }
     }
     res.dims={n, matched, votes:[...votes.entries()].sort((a,b)=>b[1]-a[1])};
   }
   // 推奨値
-  const L=Math.max(S.W,S.H)*PT_MM; const pp=res.pagePaper;
+  const L=Math.max(S.W,S.H)*PT_MM*UU; const pp=res.pagePaper; const PU=PT_MM*UU;
   const cands=[];
-  for (const [k,N] of Object.entries(res.paper)){ const f=PAPERS[k]/L; const eff=N*f; cands.push({src:`図面枠「${k}:1/${N}」`+(k===pp?'（このページの用紙）':`（${k}基準 → この用紙で 1/${+eff.toFixed(2)}）`), mmPerUnit:PT_MM*eff, eff, N, paper:k===pp?'':k, pri:k===pp?0:1}); }
+  // このページの用紙と同じ用紙名なら余白の差は無視して表記どおり（860×610 の A1 枠など）
+  for (const [k,N] of Object.entries(res.paper)){ const same=k===pp; const eff= same? N : N*PAPERS[k]/L; cands.push({src:`図面枠「${k}:1/${N}」`+(same?'（このページの用紙）':`（${k}基準 → この用紙で 1/${+eff.toFixed(2)}）`), mmPerUnit:PU*eff, eff, N, paper:same?'':k, pri:same?0:1}); }
   const noteN=new Map(); for (const nt of res.notes) noteN.set(nt.N,(noteN.get(nt.N)||0)+1);
-  for (const [N,c] of noteN) cands.push({src:`注記「S=1/${N}」×${c}`+(cands.length?'（部分詳細図の縮尺の可能性）':''), mmPerUnit:PT_MM*N, eff:N, N, pri:2});
-  if (res.dims) for (const [N,c] of res.dims.votes.slice(0,3)) if (c>=3) cands.push({src:`寸法照合 1/${N}（寸法文字 ${c}/${res.dims.n} 件が一致）`, mmPerUnit:PT_MM*N, eff:N, N, pri:3, dimVote:c});
-  cands.sort((a,b)=>a.pri-b.pri || (b.dimVote||0)-(a.dimVote||0));
-  for (let i=cands.length-1;i>0;i--) if (cands.slice(0,i).some(c=>Math.abs(c.eff/cands[i].eff-1)<0.01)) cands.splice(i,1);
+  for (const [N,c] of noteN) cands.push({src:`注記「S=1/${N}」×${c}`+((cands.length||noteN.size>1)?'（部分詳細図の縮尺の可能性）':''), mmPerUnit:PU*N, eff:N, N, pri:2});
+  if (res.dims) for (const [N,c] of res.dims.votes.slice(0,3)) if (c>=3) cands.push({src:`寸法照合 1/${N}（寸法文字 ${c}/${res.dims.n} 件が一致）`, mmPerUnit:PU*N, eff:N, N, pri:3, dimVote:c});
+  for (const [N,c] of res.bare) cands.push({src:`表記「1/${N}」×${c}（縮尺の表記が無いため寸法で確認）`, mmPerUnit:PU*N, eff:N, N, pri:2.5, bare:true});
   // 寸法照合による裏付け
   const top=res.dims&&res.dims.votes[0];
   for (const c of cands){ const v=res.dims? (res.dims.votes.find(([N])=>Math.abs(N/c.eff-1)<0.02)||[0,0])[1] : 0; c.confirm=v; }
-  let pick=cands[0]||null;
+  cands.sort((a,b)=>a.pri-b.pri || (b.confirm||0)-(a.confirm||0) || (b.dimVote||0)-(a.dimVote||0));
+  for (let i=cands.length-1;i>0;i--) if (cands.slice(0,i).some(c=>Math.abs(c.eff/cands[i].eff-1)<0.01)) cands.splice(i,1);
+  const strongDims = top && top[1]>=4 && top[1]>=0.6*res.dims.matched;
+  let pick=cands.filter(c=>!c.bare || c.confirm>=2)[0]||null;
+  // 注記の縮尺と寸法が食い違い、寸法側が強く一致 → 注記は部分詳細図とみなして寸法側を採用
+  if (pick && pick.pri===2 && !pick.confirm && strongDims){ const d=cands.find(c=>c.pri===3 && Math.abs(c.eff/top[0]-1)<0.02); if (d) pick=d; }
   if (pick && pick.pri===3 && !(top && top[1]>=4 && top[1]>=0.35*res.dims.matched)) pick=null; // 寸法のみは十分な一致がある時だけ
   res.cands=cands; res.pick=pick;
   return res;
@@ -1102,12 +1180,15 @@ function fitView(){
   S.zoom=Math.min((S.cw-2*m)/w,(S.ch-2*m)/h); S.px=(S.cw-w*S.zoom)/2; S.py=(S.ch-h*S.zoom)/2;
   viewChanged();
 }
+// 拡大率の範囲：全体表示の1/4〜（図面1mm≒画面60px相当）まで。極端な値で図面が消えるのを防ぐ
+function zoomLim(){ const w=RW()||1, h=RH()||1; const fit=Math.min((S.cw||800)/w,(S.ch||600)/h)||1; return [Math.max(0.005, fit*0.25), Math.max(fit*4, 170)]; }
+const clampZ = z => { const [a,b]=zoomLim(); return Math.max(a, Math.min(b, z)); };
 function zoomAt(f, sx, sy){
-  const nz=Math.max(0.02, Math.min(400, S.zoom*f)); f=nz/S.zoom;
+  const nz=clampZ(S.zoom*f); f=nz/S.zoom;
   S.px = sx-(sx-S.px)*f; S.py = sy-(sy-S.py)*f; S.zoom=nz; viewChanged();
 }
 let viewVer=0, hiTimer=0, hiTask=null;
-function viewChanged(){ viewVer++; scheduleSession(); drawAnn(); if (S.editing){ const it=S.editing.it, p=w2s({x:it.x,y:it.y}), ed=$('#txted'); ed.style.left=p.x+'px'; ed.style.top=p.y+'px'; ed.style.fontSize=(it.size*S.zoom)+'px'; } $('#rt').textContent=rot()+'°'; drawBg(); drawOv(); $('#sz').textContent=(S.zoom*(S.isPdf?1:1)*100).toFixed(0)+'%'; clearTimeout(hiTimer); hiTimer=setTimeout(renderHi, 160); }
+function viewChanged(){ if (!Number.isFinite(S.zoom) || S.zoom<=0) S.zoom=1; if (!Number.isFinite(S.px)) S.px=0; if (!Number.isFinite(S.py)) S.py=0; viewVer++; scheduleSession(); drawAnn(); if (S.editing){ const it=S.editing.it, p=w2s({x:it.x,y:it.y}), ed=$('#txted'); ed.style.left=p.x+'px'; ed.style.top=p.y+'px'; ed.style.fontSize=(it.size*S.zoom)+'px'; } $('#rt').textContent=rot()+'°'; drawBg(); drawOv(); $('#sz').textContent=(S.zoom*(S.isPdf?1:1)*100).toFixed(0)+'%'; clearTimeout(hiTimer); hiTimer=setTimeout(renderHi, 160); }
 function drawBg(){
   const c=bctx, d=S.dpr; c.setTransform(1,0,0,1,0,0); c.fillStyle='#3a3f48'; c.fillRect(0,0,bg.width,bg.height);
   if (!S.preview) return;
@@ -1376,6 +1457,10 @@ function pointInPoly(p,P){ let c=false; for (let i=0,j=P.length-1;i<P.length;j=i
 
 ov.addEventListener('pointerdown', e=>{
   if (!S.W) return;
+  // パームリジェクション：ペンで描いている間と離した直後の手のひら（タッチ）は無視
+  if (e.pointerType==='touch' && (S.penDown!=null || performance.now()-(S.penUpAt||0)<350)) return;
+  if (e.pointerType==='pen'){ S.penDown=e.pointerId;
+    if ([...ptrs.keys()].length){ ptrs.clear(); pinch=null; panning=null; ov.classList.remove('panning'); S.touchPlace=null; hideLoupe(); } }
   ov.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, evPt(e));
   if (ptrs.size===2){ const [a,b]=[...ptrs.values()]; pinch={d:d2(a,b), z:S.zoom, px:S.px, py:S.py, c:{x:(a.x+b.x)/2,y:(a.y+b.y)/2}}; panning=null; S.touchPlace=null; S.pinched=true; hideLoupe(); stopEdge(); if (S.drag){ S.drag=null; } if (S.noteAct){ noteCancel(); } return; }
   if (e.pointerType==='touch' && ptrs.size===1) S.pinched=false;
@@ -1438,10 +1523,11 @@ function placeTouch(){
 }
 ov.addEventListener('pointermove', e=>{
   if (!S.W) return;
+  if (e.pointerType==='touch' && !ptrs.has(e.pointerId)) return;      // 無視したタッチ（手のひら等）
   const sp=evPt(e);
   if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, sp);
-  if (pinch && ptrs.size===2){ const [a,b]=[...ptrs.values()]; const f=d2(a,b)/pinch.d; const c={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
-    S.zoom=pinch.z*f; S.px=c.x-(pinch.c.x-pinch.px)*f; S.py=c.y-(pinch.c.y-pinch.py)*f; viewChanged(); return; }
+  if (pinch && ptrs.size===2){ const [a,b]=[...ptrs.values()]; let f=d2(a,b)/pinch.d; const c={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+    f=clampZ(pinch.z*f)/pinch.z; S.zoom=pinch.z*f; S.px=c.x-(pinch.c.x-pinch.px)*f; S.py=c.y-(pinch.c.y-pinch.py)*f; viewChanged(); return; }
   if (panning){ S.px=panning.px+sp.x-panning.x; S.py=panning.py+sp.y-panning.y; viewChanged(); return; }
   if (isNoteTool(S.tool) && !S.space){ noteMove(e, sp); return; }
   if ((S.tool==='pan'||S.tool==='select') && e.pointerType==='mouse' && !e.buttons){ const l=linkAt(sp); if (l!==S.linkHover){ S.linkHover=l; ov.style.cursor = l? 'pointer' : ''; drawOv(); } }
@@ -1449,7 +1535,9 @@ ov.addEventListener('pointermove', e=>{
   if (e.pointerType==='touch' && !S.drag) return;
   const w=s2w(sp);
   $('#sx').textContent=fmtCoord(w.x); $('#sy').textContent=fmtCoord(w.y);
-  if (S.drag){ dragTo(sp); const st=S.drag.s0||(S.drag.s0=sp); if (S.drag.armed || d2(st,sp)>24){ S.drag.armed=true; edgeAuto(sp, ()=>S.drag && dragTo(S.edge.sp)); } return; }
+  if (S.drag){ const s0=S.drag.p0||(S.drag.p0=sp); if (!S.drag.moved && d2(s0,sp) < (e.pointerType==='mouse'? 3 : 9)) return;   // タップで点がずれないように
+    dragTo(sp); if (e.pointerType!=='mouse' && S.drag && S.drag.v>=0){ S.cursor=S.drag.m.pts[S.drag.v]; drawLoupe(sp); }
+    const st=S.drag.s0||(S.drag.s0=sp); if (S.drag.armed || d2(st,sp)>24){ S.drag.armed=true; edgeAuto(sp, ()=>S.drag && dragTo(S.edge.sp)); } return; }
   if (S.tool==='select'){ const h=hitMeas(sp); const id=h?h.m.id:null; ov.style.cursor = h? (h.v>=0?'move':'pointer') : ''; if (id!==S.hover){ S.hover=id; drawOv(); } return; }
   if (isMeasureTool()){
     const prev = S.draft && S.draft.pts.length ? S.draft.pts[S.draft.pts.length-1] : null;
@@ -1496,13 +1584,15 @@ function resolvePointExcluding(w, m, vi){
 }
 function fmtCoord(v){ const k=mmPer(); if (k==null) return v.toFixed(0)+'px'; return (v*k).toFixed(0); }
 function endPointer(e){
+  if (e.pointerType==='pen' && S.penDown===e.pointerId){ S.penDown=null; S.penUpAt=performance.now(); }
+  if (e.pointerType==='touch' && !ptrs.has(e.pointerId)) return;
   ptrs.delete(e.pointerId); if (ptrs.size<2) pinch=null; stopEdge();
   if (S.noteAct && S.noteAct.id===e.pointerId){ if (e.type==='pointerup') noteUp(e, evPt(e)); else noteCancel(); }
   if (S.linkDown && e.type==='pointerup'){ const L=S.linkDown; S.linkDown=null; if (d2(L.sp, evPt(e))<6) followLink(L.l); }
   if (S.touchPlace && S.touchPlace.id===e.pointerId){ if (e.type==='pointerup' && !S.pinched) placeTouch(); else { S.touchPlace=null; hideLoupe(); } }
   if (e.pointerType==='touch' && !ptrs.size){ S.pinched=false; if (!S.draft){ S.cursor=null; S.snap=null; drawOv(); } }
   if (panning){ panning=null; ov.classList.remove('panning'); }
-  if (S.drag){ if (!S.drag.moved) S.undo.pop(); else { save(); refreshList(); } S.drag=null; }
+  if (S.drag){ if (!S.drag.moved) S.undo.pop(); else { save(); refreshList(); } S.drag=null; if (e.pointerType!=='mouse'){ hideLoupe(); S.cursor=null; drawOv(); } }
 }
 ov.addEventListener('pointerup', endPointer); ov.addEventListener('pointercancel', endPointer);
 ov.addEventListener('pointerleave', ()=>{ S.cursor=null; S.snap=null; S.eraserPos=null; drawOv(); });
@@ -1862,6 +1952,9 @@ const isWindowMark = mk => /^(AW|SW|WW|FIX|AG|AF|AS|SS)/i.test(mk);
 const normMark = (a,b) => (a+'-'+b).toUpperCase();
 S.schedule = S.schedule || {}; S.marks = S.marks || {};
 S.wallDef = (()=>{ try{ return JSON.parse(localStorage.getItem('pdfmeasure:walldef')||'null') || {sys:'a2k', h:2700, base:'start'}; }catch(e){ return {sys:'a2k', h:2700, base:'start'}; } })();
+// 高さの入力チェック（m で入れた 2.7 → 2700、桁違いは拒否）
+function normH(v){ v=+v; if (!(v>0)) return 0; if (v<20){ const mm=Math.round(v*1000); toast(`高さを ${mm}mm として入力しました（mで入力された値を換算）`); return mm; }
+  if (v<300 || v>20000){ toast('壁の高さは 300〜20,000mm で入力してください'); return 0; } return Math.round(v); }
 function newWallObj(){ const W={sys:baseSysId(S.wallDef.sys||''), h:S.wallDef.h, base:S.wallDef.base||'start', openings:[]}; if (S.wallDef.opt && WVAR[W.sys+'|'+S.wallDef.opt]) W.opt=S.wallDef.opt; return W; }
 function saveWallDef(){ try{ localStorage.setItem('pdfmeasure:walldef', JSON.stringify(S.wallDef)); }catch(e){} if (typeof updateWallBar==='function') updateWallBar(); }
 
@@ -1872,6 +1965,8 @@ async function scanOpenings(){
   for (let n=1;n<=S.nPages;n++){
     if (doc!==S.doc) return;
     let page, tc; try{ page=await doc.getPage(n); tc=await page.getTextContent(); }catch(e){ continue; }
+    if (n!==S.page) try{ page.cleanup(); }catch(e){}
+    if (n%3===0) await new Promise(r=>setTimeout(r,0));   // 画面を固めない
     const vp=page.getViewport({scale:1}), T=vp.transform;
     const its=tc.items.filter(i=>i.str&&i.str.trim()).map(i=>{ const [a,b,c,d,e,f]=i.transform; return {s:nz(i.str).replace(/,/g,''), raw:i.str, x:T[0]*e+T[2]*f+T[4], y:T[1]*e+T[3]*f+T[5], h:Math.hypot(c,d)||8, w:i.width||0, hor:Math.abs(b)<1e-3&&a>0}; });
     const mp=mergePhrases(its); S.stexts[n]=mp; texts[n]=buildPhrases(its, mp); S.vtexts[n]=its.filter(i=>!i.hor && i.raw.trim().length>=1).map(i=>({raw:i.raw.trim(), x:i.x, y:i.y, h:i.h}));
@@ -2013,8 +2108,10 @@ function projectOnPoly(pts, p){ // returns {s (world), d (world), seg, t}
 }
 function pointAt(pts, s){ let acc=0; for (let i=1;i<pts.length;i++){ const a=pts[i-1], b=pts[i]; const L=d2(a,b); if (s<=acc+L || i===pts.length-1){ const t=L? Math.max(0,Math.min(1,(s-acc)/L)):0; return {x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t, ux:(b.x-a.x)/(L||1), uy:(b.y-a.y)/(L||1)}; } acc+=L; } return {x:pts[0].x,y:pts[0].y,ux:1,uy:0}; }
 function wallSys(m){ if (!m.wall) return null; normWall(m.wall); const W=m.wall; return (W.opt && WVAR[W.sys+'|'+W.opt]) || WMAP[W.sys] || null; }
+const WRULE=(()=>{ try{ return Object.assign({minDed:0.5}, JSON.parse(localStorage.getItem('pdfmeasure:wallrule')||'{}')); }catch(e){ return {minDed:0.5}; } })();
+function setWallRule(v){ WRULE.minDed=v; try{ localStorage.setItem('pdfmeasure:wallrule', JSON.stringify(WRULE)); }catch(e){} refreshList(); drawOv(); if (S.sel) refreshProps(); }
 function computeWall(m){
-  const key=JSON.stringify([m.pts,m.wall,m.arcs,mmPer(m.page)]); const ch=_cwCache.get(m); if (ch&&ch.key===key) return ch.val;
+  const key=JSON.stringify([m.pts,m.wall,m.arcs,mmPer(m.page),WRULE.minDed]); const ch=_cwCache.get(m); if (ch&&ch.key===key) return ch.val;
   const val=computeWall0(m); _cwCache.set(m,{key,val}); return val;
 }
 function computeWall0(m){
@@ -2022,9 +2119,12 @@ function computeWall0(m){
   const segs=[]; let acc=0; for (let i=1;i<m.pts.length;i++){ const L=segLen(m,i-1)*k; segs.push({a:acc,b:acc+L,L}); acc+=L; }
   const Ltot=acc, H=+W.h||0;
   const ops=(W.openings||[]).map(o=>({...o, s:Math.max(0,+o.s), e:Math.min(Ltot,+o.s+ +o.w)})).filter(o=>o.e>o.s);
-  const opArea=ops.reduce((a,o)=>a+(o.e-o.s)*Math.max(0,Math.min(+o.h,H-(+o.sill||0))),0);
+  // 公共建築数量積算基準：1箇所あたり0.5m²以下の開口は控除しない（設定で変更可）
+  const opA=o=>(o.e-o.s)*Math.max(0,Math.min(+o.h,H-(+o.sill||0))); const thr=(WRULE.minDed||0)*1e6;
+  for (const o of ops){ o.area=opA(o); o.small = thr>0 && o.area>0 && o.area<=thr; }
+  const opArea=ops.reduce((a,o)=>a+(o.small? 0 : o.area),0); const nSmall=ops.filter(o=>o.small).length;
   const area=Ltot*H, net=Math.max(0,area-opArea);
-  const pitch=+W.pitch || (sys? sys.pitch : 455);
+  const pitch=(+W.pitch>=100 && +W.pitch<=1200)? +W.pitch : (sys? sys.pitch : 455);
   const arr=sys? sys.arr : '共通';
   // studs
   const studs=[];
@@ -2064,7 +2164,7 @@ function computeWall0(m){
     }
   }
   const st=sys? studFor(sys,H) : null;
-  return {segs, Ltot, H, ops, opArea, area, net, pitch, arr, studs, sway, boards, layers, sys, st};
+  return {segs, Ltot, H, ops, opArea, nSmall, area, net, pitch, arr, studs, sway, boards, layers, sys, st};
 }
 function wallSummary(m){
   const c=computeWall(m); const f=v=>(v/1e6).toLocaleString('ja-JP',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -2115,7 +2215,7 @@ function refreshProps(){
     res=`<div class="res">
       <div><span>壁長さ</span><b>${fmtMm(c.Ltot)}</b></div>
       <div><span>壁面積（開口控除前）</span><b>${fmtMm2(c.area)}</b></div>
-      <div><span>開口面積（${c.ops.length}箇所）</span><b>−${fmtMm2(c.opArea)}</b></div>
+      <div><span>開口面積（${c.ops.length}箇所${c.nSmall?`・うち0.5m²以下${c.nSmall}箇所は控除せず`:''}）</span><b>−${fmtMm2(c.opArea)}</b></div>
       <div class="hl"><span>壁面積（片面・控除後）</span><b>${fmtMm2(c.net)}</b></div>
       ${sys?`<div><span>ボード面積（全層・${c.layers.length}層）</span><b>${fmtMm2(layersArea)}</b></div>`:''}
       <div><span>スタッド</span><b>${c.studs.length} 本${c.st&&c.st.stud?`（${c.st.stud}）`:''}</b></div>
@@ -2143,7 +2243,7 @@ function refreshProps(){
    ${res}`:''}
    <datalist id="markList">${Object.keys(S.schedule).map(k=>`<option value="${esc(k)}">`).join('')}</datalist>`;
   const upd=(fn)=>{ pushUndo(); if (!m.wall) m.wall=newWallObj(); fn(m.wall); save(); refreshListValues(); drawOv(); clearTimeout(propsTimer); propsTimer=setTimeout(refreshProps,10); };
-  $('#pH').onchange=e=>{ const v=parseFloat(e.target.value); if (!(v>0)) { if (m.wall){ upd(w=>w.h=0);} return; } upd(w=>{ w.h=v; }); S.wallDef.h=v; saveWallDef(); };
+  $('#pH').onchange=e=>{ let v=parseFloat(e.target.value); if (!(v>0)) { if (m.wall){ upd(w=>w.h=0);} return; } v=normH(v); if (!v){ e.target.value=W.h||''; return; } upd(w=>{ w.h=v; }); S.wallDef.h=v; saveWallDef(); };
   if ($('#pSplit')) $('#pSplit').onclick=()=>splitRun(m);
   $('#pSys').onchange=e=>{ upd(w=>{ w.sys=e.target.value; w.pitch=''; w.upShift=''; if (w.opt && !WVAR[w.sys+'|'+w.opt]) delete w.opt; }); S.wallDef.sys=e.target.value; saveWallDef(); };
   if ($('#pOpt')) $('#pOpt').onchange=e=>{ upd(w=>{ if (e.target.value) w.opt=e.target.value; else delete w.opt; }); S.wallDef.opt=e.target.value||''; saveWallDef(); };
@@ -2154,7 +2254,10 @@ function refreshProps(){
     el.querySelectorAll('[data-len]').forEach(cb=>cb.onchange=()=>{ const v=[...el.querySelectorAll('[data-len]:checked')].map(x=>+x.dataset.len); if (!v.length){ cb.checked=true; toast('定尺は1つ以上選んでください'); return; } upd(w=>w.lens=v); }); }
   if ($('#pUpB')){ $('#pUpB').value=W.upBoard||''; $('#pLowB').value=W.lowBoard||'';
     $('#pUpB').onchange=e=>upd(w=>w.upBoard=e.target.value); $('#pLowB').onchange=e=>upd(w=>w.lowBoard=e.target.value); }
-  $('#pPitch').onchange=e=>upd(w=>w.pitch=e.target.value? +e.target.value : '');
+  $('#pPitch').onchange=e=>{ let v=e.target.value? +e.target.value : '';
+    if (v!=='' && v>0 && v<10){ v=Math.round(v*1000); toast(`スタッド間隔を ${v}mm として入力しました（mで入力された値を換算）`); }
+    if (v!=='' && !(v>=100 && v<=1200)){ toast('スタッド間隔は 100〜1200mm で入力してください'); e.target.value=W.pitch??''; return; }
+    upd(w=>w.pitch=v); };
   $('#pBase').onchange=e=>{ upd(w=>w.base=e.target.value); S.wallDef.base=e.target.value; saveWallDef(); };
 
   if ($('#pUnwall')) $('#pUnwall').onclick=()=>{ pushUndo(); delete m.wall; save(); refreshList(); drawOv(); };
@@ -2438,7 +2541,8 @@ function drawStamp(c,a){
 function drawTape(c,a){ c.save(); if (a.open){ c.setLineDash([a.h*0.08,a.h*0.06]); c.strokeStyle=a.c; c.lineWidth=Math.max(a.h*0.02,0.3); c.strokeRect(a.x,a.y,a.w,a.h); c.globalAlpha=0.08; c.fillStyle=a.c; c.fillRect(a.x,a.y,a.w,a.h); }
   else { c.fillStyle=a.c; c.fillRect(a.x,a.y,a.w,a.h); c.globalAlpha=0.25; c.strokeStyle='#fff'; c.lineWidth=a.h*0.06; c.beginPath(); for (let x=a.x-a.h; x<a.x+a.w; x+=a.h*0.35){ c.moveTo(x,a.y+a.h); c.lineTo(x+a.h,a.y); } c.save(); c.beginPath(); c.rect(a.x,a.y,a.w,a.h); c.clip(); c.stroke(); c.restore(); }
   c.restore(); }
-function drawItem(c,a){
+function drawItem(c,a){ try{ drawItem0(c,a); }catch(e){ console.warn('描画できない書き込みを飛ばしました', a&&a.id, e); } }
+function drawItem0(c,a){
   switch(a.t){
     case 'ink': drawInk(c,a); break;
     case 'shape': drawShape(c,a); break;
@@ -2833,7 +2937,20 @@ let OLI=[];
 function outlineHtml(items, depth){ if (depth===0) OLI=[]; return items.map(it=>{ const i=OLI.push(it)-1; return `<button class="oli" data-i="${i}" style="padding-left:${6+depth*12}px">${esc(it.title||'(無題)')}</button>` + (it.items&&it.items.length? outlineHtml(it.items, depth+1) : ''); }).join(''); }
 function pageLabel(n){ const m=(S.meas[n]||[]).length, a=(S.ann[n]||[]).length; return [m?`計測${m}`:'', a?`書込${a}`:''].filter(Boolean).join('・'); }
 async function destToPage(dest){ try{ if (!dest) return 0; let d=dest; if (typeof d==='string') d=await S.doc.getDestination(d); if (!Array.isArray(d)) return 0; const ref=d[0]; if (typeof ref==='number') return ref+1; return (await S.doc.getPageIndex(ref))+1; }catch(e){ return 0; } }
-function openUrl(url){ try{ const a=document.createElement('a'); a.href=url; a.target='_blank'; a.rel='noopener'; document.body.appendChild(a); a.click(); a.remove(); }catch(e){} toast('リンク先を開きます：'+url); }
+// CSV：Excel等で開いたときに数式として実行されたり、日付・負数に化けたりしないようにする
+function csvCell(v){
+  if (v==null) return ''; if (typeof v==='number') return Number.isFinite(v)? String(v) : '';
+  let t=String(v).replace(/\r?\n/g,' ');
+  if (/^[=@\t\r]/.test(t) || (/^[+\-]/.test(t) && /[=(!|@:;$]|^[+\-][\d.\s]*[+\-*/^]/.test(t))) t="'"+t;     // 数式インジェクション対策
+  else if (/^\(?\d+\)?$/.test(t) && /^\(/.test(t)) t='No.'+t.replace(/[()]/g,'');                                  // (51) → 負数に化けるのを防ぐ
+  else if (/^\d+\/\d+/.test(t)) t='S='+t;                                                                              // 1/100 → 日付に化けるのを防ぐ
+  return /[",\n']/.test(t)||/^\s|\s$/.test(t)? '"'+t.replace(/"/g,'""')+'"' : t;
+}
+const toCsv = rows => '\ufeff'+rows.map(r=>r.map(csvCell).join(',')).join('\r\n');
+// 外部リンク：http(s)/mailto 以外（javascript:, data:, file: など）は開かない
+function safeUrl(url){ try{ const u=new URL(url, location.href); return /^(https?|mailto):$/.test(u.protocol)? u.href : null; }catch(e){ return null; } }
+function openUrl(url){ const ok=safeUrl(url); if (!ok){ toast('安全でない形式のリンクのため開きません'); return; }
+  if (!confirm('図面内のリンクを開きますか？\n'+ok)) return; url=ok; try{ const a=document.createElement('a'); a.href=url; a.target='_blank'; a.rel='noopener noreferrer'; document.body.appendChild(a); a.click(); a.remove(); }catch(e){} toast('リンク先を開きます：'+url); }
 async function loadLinks(page, vp, n){
   S.links=[]; try{ const ann=await page.getAnnotations({intent:'display'}); if (n!==S.page) return;
     S.links=ann.filter(a=>a.subtype==='Link' && (a.dest||a.url||a.unsafeUrl)).map(a=>{ const r=vp.convertToViewportRectangle(a.rect); return {x0:Math.min(r[0],r[2]),y0:Math.min(r[1],r[3]),x1:Math.max(r[0],r[2]),y1:Math.max(r[1],r[3]), dest:a.dest, url:a.url||a.unsafeUrl}; });
@@ -2927,13 +3044,30 @@ async function saveFile(filename, data){
   catch(e){ const c=e&&e.code; if (c==='declined') toast('保存をキャンセルしました'); else if (c==='rate_limited') toast('保存の確認が開いています。少し待ってから再度お試しください'); else toast('保存できませんでした（'+(c||'error')+'）'); return false; }
 }
 function baseName(){ return (S.name||'drawing').replace(/\.[^.]+$/,''); }
+// 保護（暗号化）されたPDFは元のPDFに書き足せないため、ページを画像にして新しいPDFを作る
+async function exportPdfRaster(btn, PDFLib){
+  btn && (btn.disabled=true); busy('PDFを作成中…');
+  try{ const out=await PDFLib.PDFDocument.create();
+    for (let n=1;n<=S.nPages;n++){ busy(`PDFを作成中… ${n}/${S.nPages}ページ`);
+      const page=await S.doc.getPage(n); const v1=page.getViewport({scale:1}); const sc=Math.min(2.2, 4200/Math.max(v1.width,v1.height)); const vp=page.getViewport({scale:sc});
+      const c=document.createElement('canvas'); c.width=Math.ceil(vp.width); c.height=Math.ceil(vp.height); const x=c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height);
+      await page.render({canvasContext:x, viewport:vp}).promise; if (hasContent(n)) x.drawImage(renderOverlayFor(n, v1.width, v1.height, sc), 0, 0, c.width, c.height);
+      const jpg=await toBlob(c,'image/jpeg',0.9); c.width=c.height=0; const img=await out.embedJpg(await jpg.arrayBuffer());
+      const pg=out.addPage([v1.width, v1.height]); pg.drawImage(img,{x:0,y:0,width:v1.width,height:v1.height}); await new Promise(r=>setTimeout(r,0)); }
+    const bytes=await out.save(); busy('');
+    await saveFile(baseName()+'_計測・書込.pdf', new Blob([bytes],{type:'application/pdf'})); toast('保護されたPDFのため、ページを画像にしてPDFを作成しました（文字の検索・選択はできません）');
+  }catch(e){ console.error(e); busy(''); toast('PDF作成に失敗：'+(e.message||e)); }
+  finally{ btn && (btn.disabled=false); }
+}
 async function exportPdf(btn){
   if (!S.isPdf || !S.pdfBytes){ return exportPng(); }
   const pages=[]; for (let n=1;n<=S.nPages;n++) if (hasContent(n)) pages.push(n);
   if (!pages.length){ toast('計測や書き込みのあるページがありません'); return; }
   btn && (btn.disabled=true); busy('PDFを作成中…');
   try{
-    const PDFLib=await loadPdfLib(); const pdf=await PDFLib.PDFDocument.load(S.pdfBytes.slice(0), {ignoreEncryption:true}); const pl=pdf.getPages();
+    const PDFLib=await loadPdfLib(); const pdf=await PDFLib.PDFDocument.load(S.pdfBytes.slice(0), {ignoreEncryption:true});
+    if (S.encrypted || pdf.isEncrypted){ busy(''); btn && (btn.disabled=false); return exportPdfRaster(btn, PDFLib); }
+    const pl=pdf.getPages();
     for (const n of pages){ busy(`PDFを作成中… ${n}ページ`);
       const page=await S.doc.getPage(n); const vp=page.getViewport({scale:1}); const sc=Math.min(2.2, 4200/Math.max(vp.width,vp.height));
       const ov=rotCanvas(renderOverlayFor(n, vp.width, vp.height, sc), -(page.rotate||0)); const png=await toBlob(ov);
@@ -2958,8 +3092,7 @@ async function exportCsv(){
   for (const pg of Object.keys(S.meas).map(Number).sort((a,b)=>a-b)) for (const m of S.meas[pg]){ const r=rawValue(m), k=mmPer(pg), sc=scaleOf(pg); const c=wallOk(m)? computeWall(m) : null;
     rows.push([pg, m.name, wallOk(m)?'壁':KIND_JP[m.kind], r.len!=null? (k!=null? +(r.len*lf).toFixed(4) : '') : '', r.area!=null? (k!=null? +(r.area*af).toFixed(6) : '') : '', r.deg!=null? +r.deg.toFixed(3):'', r.r!=null&&k!=null? +(r.r*lf).toFixed(3):'', sc? sc.label:'', c? m.wall.h:'', c? +(c.net/1e6).toFixed(3):'', c? +(c.opArea/1e6).toFixed(3):'', c&&c.sys? c.sys.name:'', m.room||'']); }
   if (rows.length<2){ toast('計測がありません'); return; }
-  const csv='﻿'+rows.map(r=>r.map(v=>{ const s=String(v); return /[",\n]/.test(s)? '"'+s.replace(/"/g,'""')+'"' : s; }).join(',')).join('\r\n');
-  await saveFile(baseName()+'_計測一覧.csv', csv);
+  await saveFile(baseName()+'_計測一覧.csv', toCsv(rows));
 }
 function openExport(){
   if (!S.W){ toast('先にファイルを開いてください'); return; }
@@ -3041,12 +3174,20 @@ async function cloudPull(){
     const snap=await withTimeout(cdoc().get(), 10000); if (key!==S.key) return;
     if (snap.exists){ const d=snap.data();
       if ((d.updatedAt||0) > (S.updatedAt||0)){
-        const ann={}; for (const p of (d.annPages||[])){ try{ const s2=await withTimeout(cdoc('p'+p).get(),10000); if (s2.exists){ const items=JSON.parse(JSON.stringify(s2.data().items||[])); const local=new Map((S.ann[p]||[]).map(a=>[a.id,a])); ann[p]=items.map(a=> (a.t==='img' && !a.src && local.get(a.id))? local.get(a.id) : a); } }catch(e){} }
+        const ann={}; let annFail=false; for (const p of (d.annPages||[])){ try{ const s2=await withTimeout(cdoc('p'+p).get(),10000); if (s2.exists){ const items=JSON.parse(JSON.stringify(s2.data().items||[])); const local=new Map((S.ann[p]||[]).map(a=>[a.id,a])); ann[p]=items.map(a=> (a.t==='img' && !a.src && local.get(a.id))? local.get(a.id) : a); } }catch(e){ annFail=true; ann[p]=S.ann[p]||[]; } }
         if (key!==S.key) return;
         await snapshot('クラウド同期の前');
-        const j=JSON.parse(JSON.stringify(d)); S.meas=j.meas||{}; S.scales=j.scales||{}; S.rots=j.rots||{}; S.schedule=j.schedule||S.schedule; S.bm=j.bm||{}; S.idSeq=Math.max(S.idSeq, j.idSeq||1); S.ann=ann; S.updatedAt=d.updatedAt;
-        saveLocal(); refreshAll(); drawAnn(); refreshBmBtn(); toast('クラウドから最新の計測・書き込みを読み込みました');
-      } else if ((S.updatedAt||0) > (d.updatedAt||0)) cloudMarkAll();
+        const rem=cleanState({...JSON.parse(JSON.stringify(d)), ann});
+        // この端末に未同期の変更があるときは、上書きせずに合わせる（同じIDはクラウド側を採用、この端末だけにある項目は残す）
+        const localDirty = (S.updatedAt||0) > (S.syncedAt||0);
+        let kept=0;
+        if (localDirty){ const merge=(R,L)=>{ for (const pg in L){ const ids=new Set((R[pg]||[]).map(x=>x.id)); const add=(L[pg]||[]).filter(x=>!ids.has(x.id)); if (add.length){ (R[pg] ||= []).push(...add); kept+=add.length; } } };
+          merge(rem.meas, S.meas); merge(rem.ann, S.ann); for (const pg in S.scales) if (!rem.scales[pg]) rem.scales[pg]=S.scales[pg]; }
+        S.meas=rem.meas; S.scales=rem.scales; S.rots={...S.rots, ...rem.rots}; if (Object.keys(rem.schedule).length) S.schedule=rem.schedule; S.bm={...S.bm, ...rem.bm}; S.idSeq=Math.max(S.idSeq, rem.idSeq); S.ann=rem.ann;
+        S.updatedAt = kept? Date.now() : d.updatedAt; if (!kept && !annFail) S.syncedAt=S.updatedAt;
+        saveLocal(); scheduleSave(); refreshAll(); drawAnn(); refreshBmBtn();
+        if (kept){ cloudMarkAll(); toast(`クラウドの最新を読み込み、この端末だけにあった${kept}件も残しました`); } else toast('クラウドから最新の計測・書き込みを読み込みました');
+      } else if ((S.updatedAt||0) > (d.updatedAt||0)) cloudMarkAll(); else S.syncedAt=S.updatedAt;
     } else if (Object.keys(S.meas).length || Object.keys(S.ann).length) cloudMarkAll();
     setCloud('ok');
   }catch(e){ setCloud('err'); }
@@ -3057,17 +3198,20 @@ async function cloudPush(){
   if (!CLOUD.on || !S.key) return; if (CLOUD.busy){ clearTimeout(CLOUD.timer); CLOUD.timer=setTimeout(cloudPush,1500); return; }
   CLOUD.busy=true; setCloud('sync'); const key=S.key; let warn='';
   try{
-    const pages=[...CLOUD.dirty]; CLOUD.dirty.clear();
+    const pages=[...CLOUD.dirty]; CLOUD.dirty.clear(); var pending=new Set(pages), mainWas=CLOUD.main; const pushedAt=S.updatedAt;
     for (const p of pages){ if (key!==S.key) break; let items=(S.ann[p]||[]).map(a=> a.t==='img' && a.src && a.src.length>120000? {...a, src:null} : a);
       let body={items}; if (JSON.stringify(body).length>250000){ body={items:items.map(a=>a.t==='img'? {...a,src:null}:a)}; }
       if (JSON.stringify(body).length>250000){ warn=`${p}ページの書き込みが多すぎて同期できません`; continue; }
-      await cdoc('p'+p).set(body); }
+      await cdoc('p'+p).set(body); pending.delete(p); }
     if (CLOUD.main && key===S.key){ CLOUD.main=false; const annPages=Object.keys(S.ann).filter(p=>(S.ann[p]||[]).length).map(Number);
       const body={v:1, name:S.name, updatedAt:S.updatedAt||Date.now(), meas:S.meas, scales:S.scales, rots:S.rots, schedule:S.schedule, bm:S.bm, idSeq:S.idSeq, annPages};
-      if (JSON.stringify(body).length>250000) warn='計測データが大きすぎて同期できません'; else await cdoc().set(body); }
-    setCloud(warn? 'err' : 'ok', warn||undefined); if (warn) toast(warn);
-  }catch(e){ setCloud('err'); if (e && e.code==='quota_exceeded') toast('クラウドの保存容量の上限に達しました'); }
-  finally{ CLOUD.busy=false; if (CLOUD.dirty.size || CLOUD.main){ clearTimeout(CLOUD.timer); CLOUD.timer=setTimeout(cloudPush,2500); } }
+      if (JSON.stringify(body).length>250000) warn='計測データが大きすぎて同期できません'; else { await cdoc().set(body); mainWas=false; } }
+    if (!warn && key===S.key && !pending.size && !CLOUD.dirty.size && !CLOUD.main && S.updatedAt===pushedAt) S.syncedAt=pushedAt;
+    CLOUD.fails=0; setCloud(warn? 'err' : 'ok', warn||undefined); if (warn) toast(warn);
+  }catch(e){ CLOUD.fails=(CLOUD.fails||0)+1; setCloud('err'); if (e && e.code==='quota_exceeded') toast('クラウドの保存容量の上限に達しました');
+    // 失敗したページは次回に再送する
+    if (key===S.key){ for (const p of (pending||[])) CLOUD.dirty.add(p); if (mainWas) CLOUD.main=true; } }
+  finally{ CLOUD.busy=false; if (CLOUD.dirty.size || CLOUD.main){ clearTimeout(CLOUD.timer); CLOUD.timer=setTimeout(cloudPush, CLOUD.fails? Math.min(60000, 2500*2**CLOUD.fails) : 2500); } }
 }
 
 // ===================== 自動保存・復元・履歴（IndexedDB） =====================
@@ -3076,7 +3220,7 @@ function idbOpen(){
   if (AS.dbp) return AS.dbp;
   AS.dbp=new Promise(res=>{ try{ const r=indexedDB.open('pdfmeasure',1);
     r.onupgradeneeded=()=>{ const d=r.result; d.createObjectStore('files',{keyPath:'key'}); d.createObjectStore('data',{keyPath:'key'}); const sn=d.createObjectStore('snaps',{keyPath:'id',autoIncrement:true}); sn.createIndex('key','key'); d.createObjectStore('session',{keyPath:'id'}); };
-    r.onsuccess=()=>res(r.result); r.onerror=()=>res(null); r.onblocked=()=>res(null); }catch(e){ res(null); } });
+    r.onsuccess=()=>res(r.result); r.onerror=()=>{ AS.noDb=true; res(null); }; r.onblocked=()=>res(null); }catch(e){ AS.noDb=true; res(null); } });
   return AS.dbp;
 }
 function idbReq(store, mode, fn){
@@ -3088,8 +3232,45 @@ const idbPut=(s,v)=>idbReq(s,'readwrite',st=>st.put(v));
 const idbDel=(s,k)=>idbReq(s,'readwrite',st=>st.delete(k));
 const idbSnaps=k=>idbReq('snaps','readonly',st=>st.index('key').getAll(k));
 
-function stateObj(){ return {meas:S.meas,scales:S.scales,rots:S.rots,idSeq:S.idSeq,schedule:S.schedule,ann:S.ann,bm:S.bm,updatedAt:S.updatedAt}; }
-function applyLoaded(j){ S.meas=j.meas||{}; S.scales=j.scales||{}; S.rots=j.rots||{}; S.idSeq=j.idSeq||1; S.schedule=j.schedule||{}; S.ann=j.ann||{}; S.bm=j.bm||{}; S.updatedAt=j.updatedAt||0; }
+function stateObj(){ return {meas:S.meas,scales:S.scales,rots:S.rots,idSeq:S.idSeq,schedule:S.schedule,ann:S.ann,bm:S.bm,updatedAt:S.updatedAt,syncedAt:S.syncedAt||0}; }
+// 保存データの検証：壊れた項目は捨てて、図面は必ず開けるようにする
+const isObj = v => v && typeof v==='object' && !Array.isArray(v);
+const finPt = p => p && Number.isFinite(+p.x) && Number.isFinite(+p.y);
+const fin=v=>Number.isFinite(+v);
+function annValid(a){
+  if (!isObj(a) || typeof a.t!=='string') return false;
+  switch(a.t){
+    case 'ink': return Array.isArray(a.pts) && a.pts.length>0 && a.pts.every(q=>Array.isArray(q) && fin(q[0]) && fin(q[1])) && fin(a.w);
+    case 'shape': return a.k==='ellipse'? [a.cx,a.cy,a.rx,a.ry].every(fin) : (Array.isArray(a.pts) && a.pts.length>0 && a.pts.every(finPt));
+    case 'text': return fin(a.x) && fin(a.y) && typeof a.text==='string' && fin(a.size);
+    case 'note': case 'stamp': return fin(a.x) && fin(a.y);
+    case 'img': case 'tape': return [a.x,a.y,a.w,a.h].every(fin);
+    default: return false;
+  }
+}
+function cleanState(j){
+  const out={meas:{}, scales:{}, rots:{}, schedule:{}, ann:{}, bm:{}, idSeq:1, updatedAt:0, dropped:0}; if (!isObj(j)) return out;
+  const pg = k => { const n=+k; return Number.isInteger(n) && n>=1 && n<=100000; };
+  let maxId=0;
+  if (isObj(j.meas)) for (const k in j.meas){ if (!pg(k) || !Array.isArray(j.meas[k])) { out.dropped++; continue; }
+    out.meas[k]=j.meas[k].filter(m=>{ const ok = isObj(m) && typeof m.kind==='string' && Array.isArray(m.pts) && m.pts.length>=1 && m.pts.every(finPt);
+      if (!ok){ out.dropped++; return false; }
+      m.name = typeof m.name==='string'? m.name.slice(0,200) : String(m.name??'計測'); m.page=+k; if (!Number.isFinite(+m.id)) m.id=0; maxId=Math.max(maxId,+m.id||0);
+      if (m.arcs && !isObj(m.arcs)) delete m.arcs; if (m.arcs) for (const i in m.arcs) if (!Number.isFinite(+m.arcs[i])) delete m.arcs[i];
+      if (m.wall!=null){ if (!isObj(m.wall)) delete m.wall; else { const W=m.wall; W.h = Number.isFinite(+W.h)? +W.h : 0; if (!Array.isArray(W.openings)) W.openings=[];
+        W.openings=W.openings.filter(o=>isObj(o) && [o.s,o.w,o.h].every(v=>Number.isFinite(+v))); if (typeof W.sys!=='string') W.sys=''; } }
+      return true; }); }
+  if (isObj(j.scales)) for (const k in j.scales){ const sc=j.scales[k]; if (pg(k) && isObj(sc) && Number.isFinite(+sc.mmPerUnit) && +sc.mmPerUnit>0){ sc.mmPerUnit=+sc.mmPerUnit; sc.label = typeof sc.label==='string'? sc.label : '1/'+Math.round(sc.mmPerUnit/(25.4/72)); out.scales[k]=sc; } else out.dropped++; }
+  if (isObj(j.rots)) for (const k in j.rots){ const r=+j.rots[k]; if (pg(k) && [0,90,180,270].includes(r)) out.rots[k]=r; }
+  if (isObj(j.schedule)) out.schedule=j.schedule;
+  if (isObj(j.ann)) for (const k in j.ann){ if (!pg(k) || !Array.isArray(j.ann[k])){ out.dropped++; continue; }
+    out.ann[k]=j.ann[k].filter(a=>{ const ok=annValid(a); if (!ok) out.dropped++; else maxId=Math.max(maxId,+a.id||0); return ok; }); }
+  if (isObj(j.bm)) out.bm=j.bm;
+  out.idSeq=Math.max(Number.isFinite(+j.idSeq)? +j.idSeq : 1, maxId+1); out.updatedAt=Number.isFinite(+j.updatedAt)? +j.updatedAt : 0; out.syncedAt=Number.isFinite(+j.syncedAt)? +j.syncedAt : 0;
+  return out;
+}
+function applyLoaded(j){ const c=cleanState(j); S.meas=c.meas; S.scales=c.scales; S.rots=c.rots; S.idSeq=c.idSeq; S.schedule=c.schedule; S.ann=c.ann; S.bm=c.bm; S.updatedAt=c.updatedAt; S.syncedAt=c.syncedAt;
+  if (c.dropped){ console.warn('壊れた保存データを除外', c.dropped); setTimeout(()=>toast(`保存データの一部（${c.dropped}件）が壊れていたため除外して開きました`),1200); } }
 async function loadState(){
   let ls=null; try{ ls=JSON.parse(localStorage.getItem(S.key)||'null'); }catch(e){}
   const db=await idbGet('data', S.key);
@@ -3150,8 +3331,10 @@ function fmtWhen(t){ const d=new Date(t), now=new Date(); const hm=d.toLocaleTim
   const rel = diff<1? 'たった今' : diff<60? `${Math.floor(diff)}分前` : diff<1440? `${Math.floor(diff/60)}時間前` : `${Math.floor(diff/1440)}日前`;
   const day = d.toDateString()===now.toDateString()? '今日' : `${d.getMonth()+1}/${d.getDate()}`; return `${day} ${hm}<small>${rel}</small>`; }
 async function openHistory(tab){
-  tab = tab || (S.key? 'snap' : 'recent');
+  tab = tab || (S.key? 'snap' : 'recent'); await idbOpen();
   const dlg=$('#dlg'); dlg.innerHTML=`<h3>🕘 自動保存・履歴</h3>
+   ${AS.noDb? '<p class="sub warn" style="color:#ff8a65">⚠ この画面ではブラウザの保存領域が使えないため、自動保存・履歴は働いていません（閉じると作業内容が消えます）。書き出しで保存してください。</p>' : ''}
+   ${(/iP(hone|ad|od)/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1)) && !matchMedia('(display-mode: standalone)').matches && !navigator.standalone && STANDALONE? '<p class="sub" style="color:#f5b83d">📱 iPhone/iPadのSafariは、しばらく開かないサイトの保存データを自動で消すことがあります。共有ボタン →「ホーム画面に追加」から使うと消えにくくなります。</p>' : ''}
    <p class="sub">作業内容は操作のたびにこの端末へ自動保存されます。ブラウザを閉じても、次に開くと直前の状態から再開します。間違って消したときは、下の時点に戻せます。</p>
    <div class="tabs"><button data-ht="snap" ${S.key?'':'disabled'}>このファイルの履歴</button><button data-ht="recent">最近のファイル</button></div>
    <div id="histBody" class="hist"><div class="pmini">読み込み中…</div></div>
@@ -3192,6 +3375,11 @@ async function renderRecentCard(){
 // ---- 起動時：直前の作業を自動で再開 ----
 async function tryResume(){
   const last=await idbGet('session','last'); if (!last || !last.key){ renderRecentCard(); return; }
+  // 前回の自動再開が途中で止まった（ブラウザが落ちた等）ときは、同じファイルを自動では開かない（落ち続けるのを防ぐ）
+  let g=null; try{ g=JSON.parse(localStorage.getItem('pdfmeasure:resumeGuard')||'null'); }catch(e){}
+  if (g && g.key===last.key && Date.now()-g.t<10*60e3){ try{ localStorage.removeItem('pdfmeasure:resumeGuard'); }catch(e){} renderRecentCard();
+    toast('前回このファイルを開く途中で止まったため、自動では開きませんでした。「最近のファイル」から開けます'); return; }
+  try{ localStorage.setItem('pdfmeasure:resumeGuard', JSON.stringify({key:last.key, t:Date.now()})); }catch(e){}
   const rec=await idbGet('files', last.key); if (!rec || !rec.blob){ renderRecentCard(); return; }
   busy('前回の作業を復元中…'); await openFile(new File([rec.blob], rec.name, {type:rec.type}), {stored:true, resume:true});
 }
@@ -3284,6 +3472,7 @@ function openWallBatch(opt={}){
      <label>上張の方向 <select id="wbOU"><option value="__keep">変更しない</option><option value="auto">自動（ロス最小）</option><option value="v">縦張り</option><option value="h">横張り</option></select></label>
      <span class="wbsep"></span>
      <button class="btn pri" id="wbApply">選択した線分に適用</button>
+     <label title="公共建築数量積算基準：内部仕上の開口部は1箇所0.5m²以下なら控除しない" style="margin-left:auto"><input type="checkbox" id="wbRule" ${WRULE.minDed? 'checked':''}> 0.5m²以下の開口は控除しない</label>
      <button class="btn" id="wbAuto" title="SD・AWなどの記号を各壁の近くから検出">開口を一括検出</button>
      <button class="btn" id="wbUn">壁設定を解除</button>
    </div>
@@ -3310,7 +3499,7 @@ function openWallBatch(opt={}){
         <td class="no">${r.ok? CIRC(wno.get(m.id)) : ''}</td><td>${m.page}</td>
         <td class="nm"><span class="dot" style="background:${colOf(m)}"></span>${esc(m.name)}</td>
         <td>${mm(r.L)}${noSc?' <small class="warn" title="縮尺未設定">⚠</small>':''}</td>
-        <td><input class="hin" data-f="h" type="number" min="0" step="10" value="${W.h||''}" placeholder="—"></td>
+        <td><input class="hin${r.ok&&r.c.st&&r.c.st.over?' over':''}" data-f="h" type="number" min="0" step="10" value="${W.h||''}" placeholder="—" ${r.ok&&r.c.st&&r.c.st.over?`title="この仕様の目安の高さ（〜${r.c.st.maxH}mm）を超えています"`:''}>${r.ok&&r.c.st&&r.c.st.over?'<small class="warn" title="高さが仕様の目安を超えています">⚠</small>':''}</td>
         <td><select data-f="sys"><option value="">${m.wall?'仕様未指定':'—（壁にしない）'}</option>${sysOptions(W.sys||'').replace('<option value="">（仕様を指定しない）</option>','')}</select>${m.wall&&wallOpts(W.sys).length?`<select data-f="opt" class="opt"><option value="">標準</option>${wallOpts(W.sys).map(o=>`<option value="${o}" ${W.opt===o?'selected':''}>${o==='ac'?'アクリア':'-S'}</option>`).join('')}</select>`:''}</td>
         <td class="ori">${r.ok? oriTxt(r.c, W) : ''}</td>
         <td>${r.ok&&r.nop? r.nop : ''}</td>
@@ -3326,7 +3515,7 @@ function openWallBatch(opt={}){
       <div class="wbtot"><div><span>壁</span><b>${ok.length} 箇所</b></div><div><span>延長</span><b>${(T.L/1000).toLocaleString('ja-JP',{maximumFractionDigits:2})} m</b></div><div><span>壁面積（控除前）</span><b>${m2(T.gross)} m²</b></div><div><span>開口 ${T.nop}箇所</span><b>${T.nop?'−'+m2(T.op)+' m²':'なし'}</b></div><div class="hl"><span>壁面積（片面・控除後）</span><b>${m2(T.net)} m²</b></div><div><span>両面計</span><b>${m2(T.both)} m²</b></div></div>
       <div class="wbcols"><table class="qty"><tr><th>壁仕様</th><th>壁番号</th><th>延長(m)</th><th>片面(m²)</th><th>両面(m²)</th></tr>${[...bySys].map(([k,o])=>`<tr><td>${esc(k)}</td><td>${o.nos.map(CIRC).join('')}</td><td>${(o.L/1000).toFixed(2)}</td><td>${m2(o.net)}</td><td>${m2(o.both)}</td></tr>`).join('')}</table>
       ${bt.length?`<table class="qty"><tr><th>ボード（材料別）</th><th>寸法</th><th>枚数</th><th>張付面積(m²)</th></tr>${bt.map(b=>`<tr><td>${esc(b.name)}</td><td>${b.size}</td><td><b>${b.sheets}</b></td><td>${m2(b.used)}</td></tr>`).join('')}</table>`:''}</div>
-      <div class="pmini">下地・張り方向：@スタッド間隔（＊＝手入力）、縦／横＝採用した張り方向（「固定」以外は材料ごとにロス最小を自動選択）。壁面積は壁芯長さ×高さ（片面）から開口を控除。両面計＝片面×面数（両面壁は2）。ボード枚数は壁ごとの割付（ロス最小の張り方向・定尺）の合計です。</div></div>`
+      <div class="pmini">下地・張り方向：@スタッド間隔（＊＝手入力）、縦／横＝採用した張り方向（「固定」以外は材料ごとにロス最小を自動選択）。壁面積は壁芯長さ（芯々）×高さ（片面）から開口を控除${WRULE.minDed?'（0.5m²以下の開口は控除しない）':''}。L字・T字の取り合いは芯々で重なりを差し引いていません。両面計＝片面×面数（両面壁は2）。ボード枚数は壁ごとの割付（ロス最小の張り方向・定尺）の合計です。</div></div>`
       : '<div class="pmini">高さを入力した線分がまだありません。行を選んで上の「高さ H」を入れ「適用」を押すか、表の高さ欄に直接入力してください。</div>';
     // events
     $('#wbAll').onchange=e=>{ for (const m of list) e.target.checked? WB.sel.add(m.id) : WB.sel.delete(m.id); render(); };
@@ -3334,7 +3523,7 @@ function openWallBatch(opt={}){
       tr.querySelector('[data-sel]').onchange=e=>{ e.target.checked? WB.sel.add(id) : WB.sel.delete(id); tr.classList.toggle('on',e.target.checked); $('#wbApply').textContent=`選択した ${WB.sel.size} 本に適用`; };
       tr.querySelector('.nm').onclick=()=>{ closeDlg(); if (m.page!==S.page) gotoPage(m.page).then(()=>{ S.sel=m.id; zoomTo(m); refreshList(); }); else { S.sel=m.id; zoomTo(m); refreshList(); } };
       tr.querySelectorAll('[data-f]').forEach(inp=>{ inp.addEventListener('keydown',e=>e.stopPropagation()); inp.onchange=e=>{ const f=inp.dataset.f, v=e.target.value; pushUndo();
-        if (f==='h'){ const hv=+v||0; if (!m.wall){ if (!(hv>0)) return; m.wall=newWallObj(); wallRename(m); } m.wall.h=hv; }
+        if (f==='h'){ let hv=+v||0; if (hv>0){ hv=normH(hv); if (!hv){ S.undo.pop(); render(); return; } } if (!m.wall){ if (!(hv>0)){ S.undo.pop(); return; } m.wall=newWallObj(); wallRename(m); } m.wall.h=hv; }
         if (f==='sys'){ if (!m.wall){ if (!v) return; m.wall=newWallObj(); m.wall.h=0; } m.wall.sys=v; m.wall.pitch=''; if (m.wall.opt && !WVAR[v+'|'+m.wall.opt]) delete m.wall.opt; }
         if (f==='opt'){ if (v) m.wall.opt=v; else delete m.wall.opt; }
         save(); afterWallEdit(); render(); }; }); });
@@ -3342,10 +3531,13 @@ function openWallBatch(opt={}){
   const closeDlg=()=>{ closeModal(); dlg.classList.remove('wide'); };
   dlg.querySelectorAll('#wbScope button').forEach(b=>b.onclick=()=>{ WB.scope=b.dataset.v; render(); });
   $('#wbH').onkeydown=$('#wbPitch').onkeydown=e=>{ e.stopPropagation(); if (e.key==='Enter') $('#wbApply').click(); };
+  $('#wbRule').onchange=e=>{ setWallRule(e.target.checked? 0.5 : 0); render(); };
   $('#wbApply').onclick=()=>{
     const ids=[...WB.sel]; if (!ids.length){ toast('表の左のチェックで線分を選んでください'); return; }
-    const hv=$('#wbH').value===''? null : +$('#wbH').value, sv=$('#wbSys').value, ov=$('#wbOpt').value, bv=$('#wbBase').value;
-    const pv=$('#wbPitch').value===''? null : +$('#wbPitch').value, olv=$('#wbOL').value, ouv=$('#wbOU').value;
+    let hv=$('#wbH').value===''? null : +$('#wbH').value; const sv=$('#wbSys').value, ov=$('#wbOpt').value, bv=$('#wbBase').value;
+    let pv=$('#wbPitch').value===''? null : +$('#wbPitch').value; const olv=$('#wbOL').value, ouv=$('#wbOU').value;
+    if (pv!=null && pv>0 && pv<10) pv=Math.round(pv*1000); if (pv!=null && pv!==0 && !(pv>=100 && pv<=1200)){ toast('スタッド間隔は 100〜1200mm（0＝仕様の標準）で入力してください'); return; }
+    if (hv!=null && hv!==0){ const nh=normH(hv); if (!nh) return; hv=nh; }
     if (hv==null && pv==null && sv==='__keep' && ov==='__keep' && bv==='__keep' && olv==='__keep' && ouv==='__keep'){ toast('高さ・仕様などの設定値を入力してください'); return; }
     pushUndo(); let n=0, skip=0;
     for (const m of lineMeasAll().filter(x=>WB.sel.has(x.id))){
@@ -3372,9 +3564,9 @@ function openWallBatch(opt={}){
   };
   $('#wbUn').onclick=()=>{ const ws=lineMeasAll().filter(m=>WB.sel.has(m.id) && m.wall); if (!ws.length){ toast('壁設定のある線分を選んでください'); return; }
     if (!confirmInline($('#wbUn'), `${ws.length}本の壁設定を解除`)) return; snapshot('壁設定を一括解除する前'); pushUndo(); for (const m of ws) delete m.wall; save(); afterWallEdit(); render(); };
-  const tsv=()=>wallTableRows(scopeList()).map(r=>r.join('\t')).join('\n');
+  const tsv=()=>wallTableRows(scopeList()).map(r=>r.map(v=>{ const c=csvCell(v); return c.startsWith('"')? c.slice(1,-1).replace(/""/g,'"') : c; }).join('\t')).join('\n');
   $('#wbCopy').onclick=async()=>{ const t=tsv(); try{ await navigator.clipboard.writeText(t); toast('集計表をコピーしました（Excelに貼り付け可）'); }catch(e){ showText('壁 集計表', t); } };
-  $('#wbCsv').onclick=async()=>{ const rows=wallTableRows(scopeList()); const csv='﻿'+rows.map(r=>r.map(v=>{ const s=String(v); return /[",\n]/.test(s)? '"'+s.replace(/"/g,'""')+'"' : s; }).join(',')).join('\r\n'); await saveFile(baseName()+'_壁面積集計.csv', csv); };
+  $('#wbCsv').onclick=async()=>{ const rows=wallTableRows(scopeList()); await saveFile(baseName()+'_壁面積集計.csv', toCsv(rows)); };
   $('#wbDev').onclick=()=>{ const sel=lineMeasAll().filter(m=>WB.sel.has(m.id)&&wallOk(m)); openDevView({ids: (sel.length? sel : scopeList().filter(wallOk)).map(m=>m.id), back:true}); };
   $('#bCancel').onclick=closeDlg;
   render(); $('#modal').classList.add('show');
@@ -3390,9 +3582,10 @@ function afterWallEdit(){ refreshList(); drawOv(); }
 function wallTableRows(list){
   const wno=wallNoMap(); const rows=[['No','ページ','名前','壁仕様','オプション','長さL(mm)','高さH(mm)','壁面積・控除前(m²)','開口数','開口面積(m²)','壁面積・片面控除後(m²)','面数','両面計(m²)','スタッド','ボード枚数']];
   const ok=[]; for (const m of list){ const r=wallRow(m); if (!r.ok) continue; ok.push(r); const sys=wallSys(m);
-    rows.push([CIRC(wno.get(m.id)), m.page, m.name, sys? sys.name : '', optLabel(m.wall), Math.round(r.L), r.H, +(r.gross/1e6).toFixed(3), r.nop, +(r.op/1e6).toFixed(3), +(r.net/1e6).toFixed(3), r.sides, +(r.both/1e6).toFixed(3), r.c.st&&r.c.st.stud||'', r.sheets]); }
+    rows.push([wno.get(m.id), m.page, m.name, sys? sys.name : '', optLabel(m.wall), Math.round(r.L), r.H, +(r.gross/1e6).toFixed(3), r.nop, +(r.op/1e6).toFixed(3), +(r.net/1e6).toFixed(3), r.sides, +(r.both/1e6).toFixed(3), r.c.st&&r.c.st.stud||'', r.sheets]); }
   const T=ok.reduce((a,r)=>{ a.L+=r.L; a.g+=r.gross; a.o+=r.op; a.n+=r.net; a.b+=r.both; a.s+=r.sheets; a.no+=r.nop; return a; },{L:0,g:0,o:0,n:0,b:0,s:0,no:0});
   rows.push(['合計','','','','', Math.round(T.L), '', +(T.g/1e6).toFixed(3), T.no, +(T.o/1e6).toFixed(3), +(T.n/1e6).toFixed(3), '', +(T.b/1e6).toFixed(3), '', T.s]);
+  if (WRULE.minDed) rows.push(['※開口面積は1箇所0.5m²以下を控除していません（公共建築数量積算基準）']);
   const bt=boardTotals(ok); if (bt.length){ rows.push([]); rows.push(['ボード（材料別）','寸法','枚数','張付面積(m²)']); for (const b of bt) rows.push([b.name, b.size, b.sheets, +(b.used/1e6).toFixed(3)]); }
   return rows;
 }
@@ -3450,7 +3643,7 @@ function sheetSVG(m, no, total, mode){
   const RX=W-M-RW+12, RWi=RW-24; let y=top+12;
   s+=keyPlanSVG(m, RX, y, RWi, 250); y+=266;
   const kv=[['壁仕様', sys? sys.name : '未指定'], ...(m.wall.opt? [['オプション', optLabel(m.wall)]] : []), ...(sys? [['認定', sys.fire+(sys.sound?' ／ '+sys.sound:'')], ['壁厚・面重量', `${sys.t}mm ／ 約${sys.kg}kg/m²`]] : []),
-    ['長さ L', mm(c.Ltot)+' mm'], ['高さ H', mm(c.H)+' mm'], ['壁面積（控除前）', m2(c.area)+' m²'], ['開口', c.ops.length? `${c.ops.length}箇所　−${m2(c.opArea)} m²` : 'なし'], ['壁面積（片面・控除後）', m2(c.net)+' m²'],
+    ['長さ L', mm(c.Ltot)+' mm'], ['高さ H', mm(c.H)+' mm'], ['壁面積（控除前）', m2(c.area)+' m²'], ['開口', c.ops.length? `${c.ops.length}箇所　−${m2(c.opArea)} m²${c.nSmall?`（${c.nSmall}箇所は0.5m²以下で控除せず）`:''}` : 'なし'], ...(c.st&&c.st.over? [['⚠ 高さ', `仕様の目安（〜${mm(c.st.maxH)}mm）超え・別途検討`]] : []), ['壁面積（片面・控除後）', m2(c.net)+' m²'],
     ...(sys&&sys.sides===2? [['両面計', m2(c.net*2)+' m²']] : []), ['スタッド', `${c.studs.length}本${c.st&&c.st.stud?`（${c.st.stud}／ランナー${c.st.runner}）`:''}`]];
   for (const [k,v] of kv){ const hl=/控除後/.test(k); if (hl) s+=`<rect x="${RX-4}" y="${y-14}" width="${RWi+8}" height="20" fill="#fff4d6"/>`; s+=tx(RX, y, k, 'fill="#666" font-size="12.5"')+tx(RX+RWi, y, v, `text-anchor="end" font-size="${String(v).length>30?11:12.5}" ${hl?'font-weight="bold"':''} fill="#111"`); y+=20; }
   y+=8; if (c.layers.length){ s+=tx(RX, y, 'ボード', 'font-weight="bold" font-size="13"'); y+=18;
@@ -3651,6 +3844,33 @@ function drawRunMarks(c, m, col, sel){
   c.restore();
 }
 
+
+// ---- スマホの見出し：3段→2段に（1段目：ファイル・ページ・元に戻す・縮尺、2段目：ツールと操作を横スクロール） ----
+const HDR={orig:null};
+function hdrLayout(){
+  const hdr=document.querySelector('header'), rg=document.querySelector('header>.rightgrp')||$('#mRgHome'), r2=$('#row2'); if (!hdr||!r2) return;
+  if (!HDR.orig){ const rgEl=document.querySelector('header>.rightgrp'); if (!rgEl) return; rgEl.id=rgEl.id||'mRgHome';
+    HDR.orig={rg:rgEl, kids:[...rgEl.children], bm:$('#bBm'), bmParent:$('#bBm').parentNode, scale:document.querySelector('header>.scalegrp'), hb:document.querySelector('header>.hbreak'), lbl:new Map()}; }
+  const O=HDR.orig, mob=matchMedia('(max-width:820px)').matches, tiny=matchMedia('(max-width:360px)').matches;
+  const SHORT={bThumbs:'一覧', bUndo:'戻す', bRedo:'やり直す'};
+  let ug=$('#mUndoGrp'), ag=$('#mActGrp');
+  if (mob){
+    if (!ug){ ug=document.createElement('div'); ug.id='mUndoGrp'; }
+    if (!ag){ ag=document.createElement('div'); ag.className='grp'; ag.id='mActGrp'; }
+    // 元に戻す・やり直しは、親指の届く図面左下に浮かせる（見出しを1段減らす）
+    ($('#zoomctl')||hdr).parentNode.appendChild(ug); ug.append($('#bUndo'), $('#bRedo'));
+    r2.appendChild(ag); for (const ch of O.kids) if (ch.id!=='bUndo' && ch.id!=='bRedo') ag.appendChild(ch); ag.appendChild(O.bm);
+    O.rg.style.display='none';
+    if (tiny) r2.insertBefore(O.scale, r2.firstChild); else hdr.insertBefore(O.scale, O.hb||O.rg);
+    for (const id in SHORT){ const l=document.querySelector('#'+id+' .lbl'); if (l){ if (!O.lbl.has(id)) O.lbl.set(id,l.textContent); l.textContent=SHORT[id]; } }
+  } else {
+    for (const ch of O.kids) O.rg.appendChild(ch); O.rg.style.display='';  // 元の並びに戻す O.bmParent.appendChild(O.bm);
+    hdr.insertBefore(O.scale, O.hb||O.rg); if (ug) ug.remove(); if (ag) ag.remove();
+    for (const [id,t] of O.lbl){ const l=document.querySelector('#'+id+' .lbl'); if (l) l.textContent=t; }
+  }
+  const r=$('#row2'); if (r) r.dispatchEvent(new Event('scroll'));
+}
+hdrLayout(); matchMedia('(max-width:820px)').addEventListener('change', hdrLayout); matchMedia('(max-width:360px)').addEventListener('change', hdrLayout);
 // ---------- wiring ----------
 $('#bOpen').onclick=$('#bOpen2').onclick=()=>$('#file').click();
 $('#file').onchange=e=>{ openFile(e.target.files[0]); e.target.value=''; };
@@ -3701,7 +3921,7 @@ $('#aCancel').onclick=()=>{ S.draft=null; S.openPick=null; setHint(); drawOv(); 
 $('#sheetClose').onclick=()=>openSheet(false);
 document.addEventListener('gesturestart', e=>e.preventDefault());
 document.addEventListener('dblclick', e=>{ if (e.target.closest('#stage')) e.preventDefault(); }, {passive:false});
-$('#bClear').onclick=()=>{ if (!pageMeas().length) return; snapshot('全削除の前'); pushUndo(); S.meas[S.page]=[]; S.sel=null; save(); refreshList(); drawOv(); toast('このページの計測を削除しました（Ctrl+Zで戻せます）'); };
+$('#bClear').onclick=()=>{ if (!pageMeas().length) return; if (!confirmInline($('#bClear'), '本当に全削除')) return; snapshot('全削除の前'); pushUndo(); S.meas[S.page]=[]; S.sel=null; save(); refreshList(); drawOv(); toast('このページの計測を削除しました（Ctrl+Zで戻せます）'); };
 for (const id of ['#uLen','#uArea','#uDec']) $(id).onchange=()=>{ try{ localStorage.setItem('pdfmeasure:units', JSON.stringify([$('#uLen').value,$('#uArea').value,$('#uDec').value])); }catch(e){} refreshList(); drawOv(); };
 try{ const u=JSON.parse(localStorage.getItem('pdfmeasure:units')||'null'); if (u){ $('#uLen').value=u[0]; $('#uArea').value=u[1]; $('#uDec').value=u[2]; } }catch(e){}
 $('#modal').addEventListener('pointerdown', e=>{ if (e.target.id==='modal') closeModal(); });
