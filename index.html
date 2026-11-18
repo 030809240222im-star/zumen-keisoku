@@ -365,6 +365,7 @@ table.wb tr.pgh td{background:#ffffff0a;color:var(--accent2);font-family:var(--f
 table.wb tr.sub td{background:#ffffff06;color:var(--text);border-bottom:1px solid var(--line)}
 table.wb .hin{width:70px;height:24px;background:var(--bg);border:1px solid var(--line);border-radius:4px;color:var(--text);text-align:right;padding:0 4px}
 table.wb select{height:24px;max-width:190px;background:var(--bg);border:1px solid var(--line);border-radius:4px;color:var(--text);font-size:11.5px} table.wb select.opt{max-width:78px;margin-left:3px}
+table.qty.runq td:nth-child(n+3){text-align:right;font-family:var(--mono)} table.qty.runq td:first-child{color:var(--muted)}
 table.wb td.ori{font-family:var(--font);font-size:11.5px;color:var(--muted)}
 table.wb .dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px;vertical-align:middle}
 .wbsum{margin-top:8px} .wbtot{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12.5px;padding:8px 10px;background:var(--panel2);border-radius:6px}
@@ -660,7 +661,8 @@ function valueOf(m){
   if (wallOk(m)){ const c=computeWall(m); return { main:'壁 '+fmtMm2(c.net), sub:'L '+fmtMm(c.Ltot)+' × H '+(+m.wall.h).toLocaleString()+(c.ops.length?` ／ 開口${c.ops.length}`:'')+(c.sys?' ／ '+c.sys.name:'') }; }
   switch(m.kind){
     case 'dist': return { main: fmtLen(d2(pts[0],pts[1]), m.page), sub: dxdy(pts[0],pts[1],m.page) };
-    case 'poly': return { main: fmtLen(pathLen(m,false), m.page), sub: (pts.length-1)+' 区間'+(hasArcs(m)?`（円弧${Object.keys(m.arcs).length}）`:'') };
+    case 'poly': if (m.run){ const sg=runSegs(m); return { main: fmtLen(pathLen(m,false), m.page), sub: sg.map(x=>x.arc? 'R'+fmtLen(x.r,m.page).replace(/\s*mm$/,'') : '直線').join(' → ') }; }
+      return { main: fmtLen(pathLen(m,false), m.page), sub: (pts.length-1)+' 区間'+(hasArcs(m)?`（円弧${Object.keys(m.arcs).length}）`:'') };
     case 'area': case 'rect': return { main: fmtArea(shapeArea(m), m.page), sub: '周長 '+fmtLen(pathLen(m,true), m.page)+(hasArcs(m)?` ／ 円弧${Object.keys(m.arcs).length}`:'') };
     case 'arc': { const A=arcInfo(m); return A? { main:'R '+fmtLen(A.r,m.page), sub:'弧長 '+fmtLen(A.len,m.page)+' ／ '+(Math.abs(A.sweep)*180/Math.PI).toFixed(1)+'°' } : {main:'–',sub:''}; }
     case 'circle': { const r=d2(pts[0],pts[1]); return { main:'R '+fmtLen(r,m.page), sub:'φ '+fmtLen(2*r,m.page)+' ／ 面積 '+fmtArea(Math.PI*r*r,m.page) }; }
@@ -973,7 +975,7 @@ function curvesNear(g, p, r){ if (!g || !g.cgrid) return []; const out=new Set()
 function nearestOnCurve(g, i, w){ const C=g.curves; let bt=0, bd=1e18; for (let k=0;k<=24;k++){ const p=bez(C,i,k/24), d=(p.x-w.x)**2+(p.y-w.y)**2; if (d<bd){ bd=d; bt=k/24; } }
   let h=1/24; for (let it=0; it<4; it++){ for (const t of [bt-h, bt+h]){ if (t<0||t>1) continue; const p=bez(C,i,t), d=(p.x-w.x)**2+(p.y-w.y)**2; if (d<bd){ bd=d; bt=t; } } h/=3; }
   const p=bez(C,i,bt); return {x:p.x, y:p.y, t:bt, d:Math.sqrt(bd)}; }
-function sameCircle(a,b){ return a && b && Math.hypot(a.x-b.x,a.y-b.y) < Math.max(a.r,b.r)*0.02 + 0.05 && Math.abs(a.r-b.r) < Math.max(a.r,b.r)*0.02 + 0.05; }
+function sameCircle(a,b){ return a && b && Math.hypot(a.x-b.x,a.y-b.y) < Math.max(a.r,b.r)*0.006 + 0.05 && Math.abs(a.r-b.r) < Math.max(a.r,b.r)*0.006 + 0.05; }
 // 点 a から b まで、同じ円上でつながる曲線をたどる
 function walkCurves(g, a, b, tol){
   const C=g.curves; let best=null;
@@ -1145,6 +1147,7 @@ function drawOv(){
     if (S.edge.dy>0){ c.fillStyle=g(0,0,0,EDGE); c.fillRect(0,0,S.cw,EDGE); } if (S.edge.dy<0){ c.fillStyle=g(0,S.ch,0,S.ch-EDGE); c.fillRect(0,S.ch-EDGE,S.cw,EDGE); } c.restore(); }
   S._wno=wallNoMap();
   for (const m of pageMeas()) drawMeas(c, m, m.id===S.sel, m.id===S.hover);
+  for (const m of pageMeas()) if (hasArcs(m)) drawRunMarks(c, m, colOf(m), m.id===S.sel); else if (m.kind==='arc' && m.sw && m.pts.length===3) drawSwMarks(c, m, colOf(m));
   drawNoteOverlay(c); drawFlashAndLinks(c);
   if (S.draft){
     const pts=[...S.draft.pts]; if (S.cursor) pts.push(S.cursor);
@@ -1270,7 +1273,7 @@ const HINTS = {
   area:'頂点を順にクリック → 始点クリック／Enter／ダブルクリックで閉じる。円弧の辺は「⌒円弧」(Q)をONにして終点をクリック（図面の円弧に自動追従）',
   rect:'対角の2点をクリック',
   angle:'1点目 → 頂点 → 3点目 をクリック',
-  arc:'図面の円弧・円をクリック → 半径を自動計測（円は面積も）。手動は 始点 → 円弧上の点 → 終点',
+  arc:'図面の円弧・円をクリック → 半径を自動計測（途中でRが変わる・直線になる所は切替点で区切って区間ごとに計測）。手動は 始点 → 円弧上の点 → 終点',
   pen:'ペン：なぞって書く。長押しで図形に補正／なぐり書きで消去。Apple Pencil使用時は指で移動',
   hl:'マーカー：なぞって強調。長押しで直線',
   eraser:'消しゴム：なぞって消す（計測は消えません）',
@@ -1304,7 +1307,9 @@ function setHint(){
 function addPoint(p){
   const t=S.tool;
   // 円弧ツール：図面の円弧・円をクリック → 自動で半径計測
-  if (t==='arc' && !S.draft){ const ci=curveAt(S.rawCursor||p) ?? (S.snap&&S.snap.ci); if (ci!=null){ const sh=curveShape(ci); if (sh){ addArcMeas(sh); return; } } }
+  if (t==='arc' && !S.draft){ const ci=curveAt(S.rawCursor||p) ?? (S.snap&&S.snap.ci); if (ci!=null){
+      const run=curveRun(ci); if (run && !run.closed && run.elems.length>1){ addRunMeas(run); return; }
+      const sh=curveShape(ci); if (sh){ addArcMeas(sh, run&&!run.closed? run : null); return; } } }
   if (!S.draft) S.draft={kind:t, pts:[], arcs:{}};
   const d=S.draft;
   if (d.arcMode && d.pts.length && (t==='poly'||t==='area'||t==='wall')){
@@ -1323,12 +1328,14 @@ function addPoint(p){
   if (need && d.pts.length>=need) finishDraft();
   drawOv();
 }
-function addArcMeas(sh){
+function addArcMeas(sh, run){
   pushUndo(); const list=pageMeas(); const kind=sh.kind; const n=list.filter(m=>m.kind===kind).length+1;
+  if (run && run.elems.length===1 && kind==='arc'){ const e=run.elems[0]; sh={kind:'arc', p0:e.p0, pm:e.pm, p1:e.p1}; }
   const pts = kind==='circle'? [{x:sh.c.x,y:sh.c.y}, {x:sh.start.x,y:sh.start.y}] : [sh.p0, sh.pm, sh.p1];
   const m={id:S.idSeq++, kind, pts, page:S.page, name:KIND_JP[kind]+' '+n, inc:true, color:nextColor()};
+  if (run && kind==='arc' && (run.startNote||run.endNote)) m.sw=[run.startNote,run.endNote];
   list.push(m); S.sel=m.id; save(); refreshList(); drawOv();
-  const v=valueOf(m); toast((kind==='circle'?'円':'円弧')+'を検出：'+v.main+'　'+v.sub);
+  const v=valueOf(m); toast((kind==='circle'?'円':'円弧')+'を検出：'+v.main+'　'+v.sub+(m.sw?'（切替点まで）':''));
 }
 function segMidPt(m,i){ const a=m.pts[i], b=m.pts[(i+1)%m.pts.length]; const bb=m.arcs&&m.arcs[i]; if (bb){ const A=segArc(a,b,bb); if (A) return arcMidPt(A); } return {x:(a.x+b.x)/2, y:(a.y+b.y)/2}; }
 function finishDraft(cancelIfInvalid){
@@ -2096,7 +2103,7 @@ function sysCard(w, H, W){
 let propsTimer=0;
 function refreshProps(){
   const el=$('#props'); if (!el) return; const m=selMeas();
-  if (m && (m.kind==='area'||m.kind==='rect'||m.kind==='circle')){ el.style.display=''; renderRoomProps(el,m); if (m.kind==='circle') el.insertAdjacentHTML('beforeend', arcPropsHtml(m)); return; }
+  if (m && (m.kind==='area'||m.kind==='rect'||m.kind==='circle')){ el.style.display=''; renderRoomProps(el,m); if (m.kind==='circle') el.insertAdjacentHTML('beforeend', arcPropsHtml(m)); if (m.kind==='area' && hasArcs(m)){ el.insertAdjacentHTML('beforeend', runBreakdownHtml(m)); const b=$('#pSplit'); if (b) b.remove(); } return; }
   if (m && m.kind==='arc'){ el.style.display=''; el.innerHTML=`<h2><span>円弧 — ${esc(m.name)}</span></h2>`+arcPropsHtml(m); return; }
   if (!m || !(m.kind==='poly'||m.kind==='dist')){ el.innerHTML = S.markInfo? `<div class="pmini">開口記号：図面内 ${S.markInfo.n}件（${S.markInfo.kinds}種）／建具表からサイズ取得 ${S.markInfo.sched}件</div>`:''; el.style.display=S.markInfo?'':'none'; return; }
   el.style.display='';
@@ -2116,7 +2123,7 @@ function refreshProps(){
     <div style="display:flex;gap:6px"><button class="btn pri" style="flex:1" id="pElev">割付図（立面）</button><button class="btn" style="flex:1" id="pDev">展開図①②③…</button></div>`;
   }
   const ops=(W.openings||[]);
-  el.innerHTML=`
+  el.innerHTML=runBreakdownHtml(m)+`
    <h2><span>壁設定 — ${esc(m.name)}</span>${m.wall?'<button class="mini" id="pUnwall" title="壁設定を外す">解除</button>':''}</h2>
    <div class="pg"><label>高さ H</label><input class="inp" id="pH" type="number" step="10" min="0" value="${W.h??''}" placeholder="例 2700"><span class="u">mm</span></div>
    <div class="pg"><label>壁仕様</label><select id="pSys">${sysOptions(W.sys||'')}</select></div>
@@ -2137,6 +2144,7 @@ function refreshProps(){
    <datalist id="markList">${Object.keys(S.schedule).map(k=>`<option value="${esc(k)}">`).join('')}</datalist>`;
   const upd=(fn)=>{ pushUndo(); if (!m.wall) m.wall=newWallObj(); fn(m.wall); save(); refreshListValues(); drawOv(); clearTimeout(propsTimer); propsTimer=setTimeout(refreshProps,10); };
   $('#pH').onchange=e=>{ const v=parseFloat(e.target.value); if (!(v>0)) { if (m.wall){ upd(w=>w.h=0);} return; } upd(w=>{ w.h=v; }); S.wallDef.h=v; saveWallDef(); };
+  if ($('#pSplit')) $('#pSplit').onclick=()=>splitRun(m);
   $('#pSys').onchange=e=>{ upd(w=>{ w.sys=e.target.value; w.pitch=''; w.upShift=''; if (w.opt && !WVAR[w.sys+'|'+w.opt]) delete w.opt; }); S.wallDef.sys=e.target.value; saveWallDef(); };
   if ($('#pOpt')) $('#pOpt').onchange=e=>{ upd(w=>{ if (e.target.value) w.opt=e.target.value; else delete w.opt; }); S.wallDef.opt=e.target.value||''; saveWallDef(); };
   if (!m.wall) return;
@@ -2162,7 +2170,8 @@ function arcPropsHtml(m){ const A=arcInfo(m); if (!A) return ''; const pg=m.page
   const rows=[['半径 R',fmtLen(A.r,pg)],['直径',fmtLen(2*A.r,pg)]];
   if (m.kind==='arc'){ rows.push(['弧長',fmtLen(A.len,pg)],['中心角',(th*180/Math.PI).toFixed(2)+'°'],['弦長',fmtLen(d2(m.pts[0],m.pts[2]),pg)],['矢高',fmtLen(A.r*(1-Math.cos(th/2)),pg)],['扇形の面積',fmtArea(A.r*A.r*th/2,pg)],['弓形の面積',fmtArea(A.r*A.r/2*(th-Math.sin(th)),pg)]); }
   else rows.push(['円周',fmtLen(A.len,pg)]);
-  return `<div class="res">${rows.map(([k,v],i)=>`<div${i===0?' class="hl"':''}><span>${k}</span><b>${v}</b></div>`).join('')}</div><div class="pmini">点をドラッグで修正できます（${m.kind==='arc'?'始点・通過点・終点':'中心・円周上の点'}）。</div>`; }
+  const swn = m.sw? [m.sw[0]&&'始点側で'+m.sw[0]+'に切替', m.sw[1]&&'終点側で'+m.sw[1]+'に切替'].filter(Boolean).join('／') : '';
+  return `<div class="res">${rows.map(([k,v],i)=>`<div${i===0?' class="hl"':''}><span>${k}</span><b>${v}</b></div>`).join('')}</div>${swn?`<div class="pmini">◆ 切替点まで計測：${esc(swn)}</div>`:''}<div class="pmini">点をドラッグで修正できます（${m.kind==='arc'?'始点・通過点・終点':'中心・円周上の点'}）。</div>`; }
 function renderRoomProps(el,m){
   const P=geomPts(m); const cands=roomCandidates(m);
   el.innerHTML=`<h2><span>部屋 — ${esc(m.name)}</span></h2>
@@ -3524,6 +3533,124 @@ if (STANDALONE && /^https?:$/.test(location.protocol)) {
     ft.insertBefore(w, $('#saveSt').nextSibling);
   }).catch(()=>{});
 }
+// ===================== 連続曲線（R切替・直線への切替点ごとに区間を分けて計測） =====================
+const sameCircleT = (a,b) => a && b && Math.hypot(a.x-b.x,a.y-b.y) < Math.max(a.r,b.r)*0.006 + 0.05 && Math.abs(a.r-b.r) < Math.max(a.r,b.r)*0.006 + 0.05;
+const vnorm = v => { const l=Math.hypot(v.x,v.y)||1; return {x:v.x/l, y:v.y/l}; };
+const angBetween = (u,v) => Math.acos(Math.max(-1,Math.min(1,u.x*v.x+u.y*v.y)));
+function bezCtl(C,i,k){ return {x:C[i*8+k*2], y:C[i*8+k*2+1]}; }
+function bezDirOut(C,i,atStart){ // 端点から曲線の内側へ向かう接線方向（制御点が端点と重なる場合は次の点で代用）
+  const P=[0,1,2,3].map(k=>bezCtl(C,i,k)); const seq=atStart? [P[0],P[1],P[2],P[3]] : [P[3],P[2],P[1],P[0]];
+  for (let k=1;k<4;k++){ const v={x:seq[k].x-seq[0].x, y:seq[k].y-seq[0].y}; if (Math.hypot(v.x,v.y)>1e-6) return vnorm(v); } return null; }
+// 曲線 i0 に端点 pt から入り、同じ円の範囲をたどる → 円弧要素
+function arcElemFrom(g, i0, pt, tol, used){
+  const C=g.curves; const c0=curveCircle(g,i0); if (!c0) return null;
+  const rev = d2(bezP3(C,i0),pt) < d2(bezP0(C,i0),pt);
+  const chain=[{i:i0,rev}]; used.add(i0); let end = rev? bezP0(C,i0) : bezP3(C,i0);
+  for (let k=0;k<64;k++){ let nx=null;
+    for (const j of curvesNear(g,end,tol)){ if (used.has(j) || !sameCircleT(curveCircle(g,j),c0)) continue;
+      if (d2(bezP0(C,j),end)<=tol){ nx={i:j,rev:false}; break; } if (d2(bezP3(C,j),end)<=tol){ nx={i:j,rev:true}; break; } }
+    if (!nx) break; chain.push(nx); used.add(nx.i); end = nx.rev? bezP0(C,nx.i) : bezP3(C,nx.i); if (d2(end,pt)<=tol) break; }
+  const last=chain[chain.length-1]; const dirEnd=bezDirOut(C,last.i,last.rev); // 終点での進行方向（=終点から曲線内側の逆）
+  const pm=chainMid(g,chain); const A=arc3(pt,pm,end); if (!A) return null;
+  return {type:'arc', p0:{x:pt.x,y:pt.y}, p1:end, pm, r:A.r, dirOut: dirEnd? {x:-dirEnd.x,y:-dirEnd.y} : null, closed: d2(end,pt)<=tol && chain.length>1};
+}
+function segsAt(g, pt, tol){ const out=[]; const [i0,j0]=g.cell(pt.x-tol,pt.y-tol), [i1,j1]=g.cell(pt.x+tol,pt.y+tol); const seen=new Set(); const sg=g.segs;
+  for (let j=j0;j<=j1;j++) for (let i=i0;i<=i1;i++){ const a=g.grid.get(j*g.gx+i); if (a) for (const s of a){ if (seen.has(s)) continue; seen.add(s);
+    const p={x:sg[s*4],y:sg[s*4+1]}, q={x:sg[s*4+2],y:sg[s*4+3]}; if (d2(p,pt)<=tol) out.push({s,far:q}); else if (d2(q,pt)<=tol) out.push({s,far:p}); } }
+  return out; }
+// 端点 pt から dir の向きに、接線がつながる次の要素（別Rの円弧・直線）を探す
+function nextElem(g, pt, dir, tol, used, usedS){
+  const C=g.curves; let best=null; const MAXA=12*Math.PI/180;
+  for (const j of curvesNear(g,pt,tol)){ if (used.has(j) || !curveCircle(g,j)) continue;
+    let atStart; if (d2(bezP0(C,j),pt)<=tol) atStart=true; else if (d2(bezP3(C,j),pt)<=tol) atStart=false; else continue;
+    const v=bezDirOut(C,j,atStart); if (!v) continue; const a=angBetween(dir,v); if (a<MAXA && (!best||a<best.a)) best={a, kind:'arc', j}; }
+  for (const o of segsAt(g,pt,tol)){ if (usedS.has(o.s)) continue; const L=d2(pt,o.far); if (L<=tol*2) continue;
+    const v=vnorm({x:o.far.x-pt.x, y:o.far.y-pt.y}); const a=angBetween(dir,v); if (a<MAXA && (!best||a<best.a-1e-3)) best={a, kind:'line', s:o.s, far:o.far, dir:v}; }
+  return best;
+}
+// 一方向へ伸ばす（直線は、その先に円弧が続く場合だけ採用）
+function extendRun(g, pt, dir, tol, used, usedS){
+  const out=[]; let endNote='';
+  for (let k=0;k<40 && dir;k++){
+    const nx=nextElem(g, pt, dir, tol, used, usedS); if (!nx) break;
+    if (nx.kind==='arc'){ const e=arcElemFrom(g, nx.j, pt, tol, used); if (!e) break; out.push(e); pt=e.p1; dir=e.dirOut; if (e.closed) break; continue; }
+    // 直線：同じ向きに続く短い線分はまとめる
+    usedS.add(nx.s); let far=nx.far; const ldir=nx.dir;
+    for (let q=0;q<50;q++){ const more=segsAt(g,far,tol).filter(o=>!usedS.has(o.s)).map(o=>({...o, v:vnorm({x:o.far.x-far.x,y:o.far.y-far.y})})).filter(o=>angBetween(ldir,o.v)<1.5*Math.PI/180 && d2(o.far,far)>tol);
+      if (more.length!==1) break; usedS.add(more[0].s); far=more[0].far; }
+    out.push({type:'line', p0:{x:pt.x,y:pt.y}, p1:far, dirOut:ldir}); pt=far; dir=ldir;
+  }
+  // 末尾の直線は含めない（切替点で止める）
+  while (out.length && out[out.length-1].type==='line'){ out.pop(); endNote='直線'; }
+  if (!endNote && out.length===0) endNote='';
+  return {elems:out, endNote};
+}
+function curveRun(i0){
+  const g=S.geo; if (!g || !g.curves) return null; const C=g.curves; const c0=curveCircle(g,i0); if (!c0) return null;
+  const tol=Math.max(0.3, 4/S.zoom, c0.r*0.002);
+  // 起点の円弧（同じ円の範囲）を両方向に確定
+  const used=new Set(), usedS=new Set();
+  const fwd=arcElemFrom(g, i0, bezP0(C,i0), tol, used); if (!fwd) return null;
+  if (fwd.closed) return {closed:true, c:c0, start:bezP0(C,i0)};
+  // 起点曲線より手前側（P0側）に同じ円が続く場合を取り込む
+  let core=fwd; const back=[]; { const tmp=new Set(used); let pt=bezP0(C,i0);
+    for (let k=0;k<64;k++){ let nx=null; for (const j of curvesNear(g,pt,tol)){ if (tmp.has(j) || !sameCircleT(curveCircle(g,j),c0)) continue; if (d2(bezP3(C,j),pt)<=tol){ nx={j,np:bezP0(C,j)}; break; } if (d2(bezP0(C,j),pt)<=tol){ nx={j,np:bezP3(C,j)}; break; } } if (!nx) break; tmp.add(nx.j); back.push(nx.j); pt=nx.np; }
+    if (back.length){ const start=pt; used.clear(); const e=arcElemFrom(g, back[back.length-1], start, tol, used); if (e) core=e; } }
+  // 前後へ伸ばす
+  const after=extendRun(g, core.p1, core.dirOut, tol, used, usedS);
+  const startDir = (()=>{ const used2=new Set(); const e=arcElemFrom(g, i0, core.p1, tol, used2); return e && e.dirOut; })(); // 逆向きにたどって始点側の向きを得る
+  const before=extendRun(g, core.p0, startDir, tol, used, usedS);
+  const flip=e=>({...e, p0:e.p1, p1:e.p0});
+  const elems=[...before.elems.reverse().map(flip), core, ...after.elems];
+  return {elems, startNote:before.endNote, endNote:after.endNote};
+}
+function addRunMeas(run){
+  pushUndo(); const list=pageMeas(); const els=run.elems;
+  const pts=[els[0].p0, ...els.map(e=>e.p1)].map(p=>({x:p.x,y:p.y})); const arcs={};
+  els.forEach((e,i)=>{ if (e.type==='arc') arcs[i]=bulgeFromThrough(e.p0,e.pm,e.p1); });
+  const n=list.filter(m=>m.run).length+1;
+  const m={id:S.idSeq++, kind:'poly', pts, arcs, run:{startNote:run.startNote||'', endNote:run.endNote||''}, page:S.page, name:'連続曲線 '+n, inc:true, color:nextColor()};
+  list.push(m); S.sel=m.id; save(); refreshList(); drawOv();
+  const sg=runSegs(m); toast(`連続曲線を検出：${sg.filter(s=>s.arc).length}つのR区間${sg.some(s=>!s.arc)?'＋直線':''}・合計 ${fmtLen(pathLen(m,false),m.page)}`);
+}
+// 区間の内訳（円弧/直線、R、長さ、累計）
+function runSegs(m){
+  const P=m.pts, n=P.length, closed=m.kind==='area' && !m.draft, segN=closed? n : n-1; const out=[]; let acc=0;
+  for (let i=0;i<segN;i++){ const a=P[i], b=P[(i+1)%n]; const bb=m.arcs&&m.arcs[i]; const A=bb? segArc(a,b,bb) : null;
+    const L=A? A.len : d2(a,b); acc+=L; out.push({i, arc:!!A, r:A?A.r:0, deg:A?Math.abs(A.sweep)*180/Math.PI:0, len:L, acc, a, b, A}); }
+  return out;
+}
+function runBreakdownHtml(m){
+  if (!hasArcs(m)) return ''; const pg=m.page; const sg=runSegs(m);
+  const rows=sg.map((s,k)=>`<tr><td>${k+1}</td><td>${s.arc?'<b style="color:var(--accent)">R</b> '+fmtLen(s.r,pg):'直線'}</td><td>${fmtLen(s.len,pg)}</td><td>${s.arc? s.deg.toFixed(1)+'°':''}</td><td>${fmtLen(s.acc,pg)}</td></tr>`).join('');
+  const arcL=sg.filter(s=>s.arc).reduce((a,s)=>a+s.len,0), lineL=sg.filter(s=>!s.arc).reduce((a,s)=>a+s.len,0);
+  const note=m.run? [m.run.startNote&&`始点側は${m.run.startNote}に切り替わります`, m.run.endNote&&`終点側は${m.run.endNote}に切り替わります`].filter(Boolean).join('／') : '';
+  return `<h2><span>区間の内訳（切替点ごと）</span><button class="mini" id="pSplit" title="区間ごとに別々の計測に分ける">区間に分割</button></h2>
+   <table class="qty runq"><tr><th>#</th><th>種類・R</th><th>長さ</th><th>中心角</th><th>始点から</th></tr>${rows}</table>
+   <div class="res"><div><span>R区間の長さ計（${sg.filter(s=>s.arc).length}区間）</span><b>${fmtLen(arcL,pg)}</b></div>${lineL?`<div><span>直線の長さ計</span><b>${fmtLen(lineL,pg)}</b></div>`:''}<div class="hl"><span>合計</span><b>${fmtLen(arcL+lineL,pg)}</b></div></div>
+   <div class="pmini">◆＝切替点（Rが変わる・直線になる位置）。「始点から」は始点から各区間の終わり（切替点）までの累計長さです。${note?'<br>'+esc(note)+'。':''}</div>`;
+}
+function splitRun(m){
+  const sg=runSegs(m); if (sg.length<2) return; pushUndo(); const list=pageMeas(); const idx=list.indexOf(m); const base=m.name;
+  const parts=sg.map((s,k)=>s.arc? {id:S.idSeq++, kind:'arc', pts:[{...s.a}, arcMidPt(s.A), {...s.b}], page:m.page, name:`${base}-${k+1}`, inc:true, color:m.color}
+                                  : {id:S.idSeq++, kind:'dist', pts:[{...s.a},{...s.b}], page:m.page, name:`${base}-${k+1}`, inc:true, color:m.color});
+  list.splice(idx,1,...parts); S.sel=parts[0].id; save(); refreshList(); drawOv(); toast(`${parts.length}つの計測に分割しました`);
+}
+function drawSwMarks(c, m, col){ c.save(); [[m.sw[0],m.pts[0]],[m.sw[1],m.pts[2]]].forEach(([nt,pt])=>{ if (!nt) return; const p=w2s(pt);
+  c.beginPath(); c.moveTo(p.x,p.y-6); c.lineTo(p.x+6,p.y); c.lineTo(p.x,p.y+6); c.lineTo(p.x-6,p.y); c.closePath(); c.fillStyle='#fff'; c.fill(); c.lineWidth=2; c.strokeStyle=col; c.stroke(); }); c.restore(); }
+// 図面上：切替点の◆と区間ごとのR・長さ
+function drawRunMarks(c, m, col, sel){
+  if (!hasArcs(m) || m.draft) return; const sg=runSegs(m); if (sg.length<2 && !m.run) return;
+  const showLbl = sel || !!m.run;
+  c.save();
+  for (let k=1;k<sg.length;k++){ const p=w2s(sg[k].a); c.beginPath(); c.moveTo(p.x,p.y-6); c.lineTo(p.x+6,p.y); c.lineTo(p.x,p.y+6); c.lineTo(p.x-6,p.y); c.closePath(); c.fillStyle='#fff'; c.fill(); c.lineWidth=2; c.strokeStyle=col; c.stroke(); }
+  if (showLbl) for (const s of sg){ const mp=w2s(s.arc? arcMidPt(s.A) : {x:(s.a.x+s.b.x)/2,y:(s.a.y+s.b.y)/2});
+    const t=(s.arc? 'R'+fmtLen(s.r,m.page).replace(/\s*mm$/,'') : '直線')+'  '+fmtLen(s.len,m.page);
+    c.font='600 11px '+FONT_STACK; const w=c.measureText(t).width+10; c.fillStyle='#14171ce6'; c.fillRect(mp.x-w/2, mp.y+8, w, 17); c.strokeStyle=col; c.lineWidth=1; c.strokeRect(mp.x-w/2, mp.y+8, w, 17);
+    c.fillStyle='#fff'; c.textAlign='center'; c.textBaseline='middle'; c.fillText(t, mp.x, mp.y+16.5); }
+  c.restore();
+}
+
 // ---------- wiring ----------
 $('#bOpen').onclick=$('#bOpen2').onclick=()=>$('#file').click();
 $('#file').onchange=e=>{ openFile(e.target.files[0]); e.target.value=''; };

@@ -1,6 +1,6 @@
 // 図面計測ツール Service Worker — オフライン起動用（アプリ本体と読み込むライブラリをキャッシュ）
 // ※ Cloudflare Access のログイン画面（リダイレクト）はキャッシュしない
-const VER='zumen-v2';
+const VER='zumen-v3';
 const CORE=['./','./index.html','./cmaps-ja.json','./manifest.webmanifest','./icon-192.png','./icon-512.png','./apple-touch-icon.png'];
 const LIBS=['https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
