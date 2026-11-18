@@ -1,0 +1,7 @@
+{
+  // このフォルダを開くと、VS Code が次の拡張機能のインストールを提案します
+  "recommendations": [
+    "anthropic.claude-code",
+    "ritwickdey.LiveServer"
+  ]
+}
