@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="図面計測">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="mobile-web-app-capable" content="yes">
-<link rel="manifest" href="manifest.webmanifest">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
 <link rel="icon" type="image/png" href="icon-192.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 
@@ -3513,6 +3513,16 @@ if (STANDALONE && 'serviceWorker' in navigator && /^https?:$/.test(location.prot
   addEventListener('load', ()=>{ navigator.serviceWorker.register('sw.js').then(reg=>{
     reg.addEventListener('updatefound', ()=>{ const w=reg.installing; w && w.addEventListener('statechange', ()=>{ if (w.state==='installed' && navigator.serviceWorker.controller) toast('新しいバージョンがあります。再読み込みすると更新されます'); }); });
   }).catch(()=>{}); });
+}
+
+// ---- Cloudflare Access で保護されたサイトのとき：ログイン中のメールとログアウトを表示 ----
+if (STANDALONE && /^https?:$/.test(location.protocol)) {
+  fetch('/cdn-cgi/access/get-identity', {credentials:'include'}).then(r=>r.ok? r.json() : null).then(j=>{
+    if (!j || !j.email) return; const ft=$('#saveSt') && $('#saveSt').parentNode; if (!ft) return;
+    const w=document.createElement('span'); w.id='who'; w.style.cssText='margin-left:10px;color:var(--muted);white-space:nowrap;cursor:pointer';
+    w.title='クリックでログアウト'; w.textContent='👤 '+j.email; w.onclick=()=>{ if (confirm(j.email+' からログアウトしますか？')) location.href='/cdn-cgi/access/logout'; };
+    ft.insertBefore(w, $('#saveSt').nextSibling);
+  }).catch(()=>{});
 }
 // ---------- wiring ----------
 $('#bOpen').onclick=$('#bOpen2').onclick=()=>$('#file').click();
