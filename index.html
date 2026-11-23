@@ -2121,12 +2121,14 @@ function computeWall0(m){
   const k=mmPer(m.page) ?? 1; const W=m.wall; const sys=wallSys(m);
   const segs=[]; let acc=0; for (let i=1;i<m.pts.length;i++){ const L=segLen(m,i-1)*k; segs.push({a:acc,b:acc+L,L}); acc+=L; }
   const Ltot=acc, H=+W.h||0;
+  // 天井高を入れた壁：LGS は高さ H まで、ボードは天井高＋100 まで（dxf-takeoff の積算と同じ決まり）
+  const Hb = +W.ceil>0? Math.min(H, +W.ceil+100) : H;
   const ops=(W.openings||[]).map(o=>({...o, s:Math.max(0,+o.s), e:Math.min(Ltot,+o.s+ +o.w)})).filter(o=>o.e>o.s);
   // 公共建築数量積算基準：1箇所あたり0.5m²以下の開口は控除しない（設定で変更可）
-  const opA=o=>(o.e-o.s)*Math.max(0,Math.min(+o.h,H-(+o.sill||0))); const thr=(WRULE.minDed||0)*1e6;
+  const opA=o=>(o.e-o.s)*Math.max(0,Math.min(+o.h,Hb-(+o.sill||0))); const thr=(WRULE.minDed||0)*1e6;
   for (const o of ops){ o.area=opA(o); o.small = thr>0 && o.area>0 && o.area<=thr; }
   const opArea=ops.reduce((a,o)=>a+(o.small? 0 : o.area),0); const nSmall=ops.filter(o=>o.small).length;
-  const area=Ltot*H, net=Math.max(0,area-opArea);
+  const area=Ltot*Hb, net=Math.max(0,area-opArea);
   const pitch=(+W.pitch>=100 && +W.pitch<=1200)? +W.pitch : (sys? sys.pitch : 455);
   const arr=sys? sys.arr : '共通';
   // studs
@@ -2161,13 +2163,13 @@ function computeWall0(m){
         const key=sd+(isUp?'上張':(nL>2? `下張${li+1}`:'下張'));
         const sideStuds=studs.filter(s=>s.side==='AB'||s.side===sd).map(s=>s.x);
         const pref = isUp? (W.orientUp||W.orient||'auto') : (W.orientLow||W.orient||'auto');
-        const res=optimizeLayer({segs,H,ops,B,W,sideStuds,lower:lowerRes, mustOnStud: li===0, pref});
+        const res=optimizeLayer({segs,H:Hb,ops,B,W,sideStuds,lower:lowerRes, mustOnStud: li===0, pref});
         boards[key]={...res, board:B}; layers.push(key); lowerRes=res;
       }
     }
   }
   const st=sys? studFor(sys,H) : null;
-  return {segs, Ltot, H, ops, opArea, nSmall, area, net, pitch, arr, studs, sway, boards, layers, sys, st, wallRef:{opClr:W.opClr}};
+  return {segs, Ltot, H, Hb, ops, opArea, nSmall, area, net, pitch, arr, studs, sway, boards, layers, sys, st, wallRef:{opClr:W.opClr}};
 }
 function wallSummary(m){
   const c=computeWall(m); const f=v=>(v/1e6).toLocaleString('ja-JP',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -2229,6 +2231,8 @@ function refreshProps(){
   el.innerHTML=runBreakdownHtml(m)+`
    <h2><span>壁設定 — ${esc(m.name)}</span>${m.wall?'<button class="mini" id="pUnwall" title="壁設定を外す">解除</button>':''}</h2>
    <div class="pg"><label>高さ H</label><input class="inp" id="pH" type="number" step="10" min="0" value="${W.h??''}" placeholder="例 2700"><span class="u">mm</span></div>
+   ${m.wall?`<div class="pg"><label>ボードの高さ</label><div class="segb" id="pCeilSeg"><button data-v="0" class="${+W.ceil>0?'':'on'}">H まで</button><button data-v="1" class="${+W.ceil>0?'on':''}">天井高＋100</button></div></div>
+   ${+W.ceil>0?`<div class="pg"><label>天井高</label><input class="inp" id="pCeil" type="number" step="10" min="0" value="${W.ceil}"><span class="u">mm</span></div><div class="pmini">ボードは ${Math.min(+W.h||0, +W.ceil+100).toLocaleString()}mm まで張り、LGS は高さ H（${(+W.h||0).toLocaleString()}mm）まで立てます。</div>`:''}`:''}
    <div class="pg"><label>壁仕様</label><select id="pSys">${sysOptions(W.sys||'')}</select></div>
    ${m.wall && wallOpts(W.sys).length?`<div class="pg"><label>オプション</label><select id="pOpt"><option value="">標準（${esc(WMAP[W.sys].ins||'—')}）</option>${wallOpts(W.sys).map(o=>`<option value="${o}" ${W.opt===o?'selected':''}>${esc(W_OPT[o])}</option>`).join('')}</select></div>`:''}
    ${m.wall? sysCard(sys,H,W) : '<div class="note">高さを入力すると、この線分を壁として面積計算・割付できます。</div>'}
@@ -2254,6 +2258,11 @@ function refreshProps(){
   $('#pSys').onchange=e=>{ upd(w=>{ w.sys=e.target.value; w.pitch=''; w.upShift=''; if (w.opt && !WVAR[w.sys+'|'+w.opt]) delete w.opt; }); S.wallDef.sys=e.target.value; saveWallDef(); };
   if ($('#pOpt')) $('#pOpt').onchange=e=>{ upd(w=>{ if (e.target.value) w.opt=e.target.value; else delete w.opt; }); S.wallDef.opt=e.target.value||''; saveWallDef(); };
   if (!m.wall) return;
+  el.querySelectorAll('#pCeilSeg button').forEach(b=>b.onclick=()=>{
+    if (b.dataset.v==='0') return upd(w=>{ delete w.ceil; });
+    const d=+W.ceil||+S.wallDef.ceil||Math.max(0,(+W.h||0)-300)||2400;
+    upd(w=>{ w.ceil=d; }); });
+  if ($('#pCeil')) $('#pCeil').onchange=e=>{ const v=parseFloat(e.target.value); upd(w=>{ if (v>0) w.ceil=v; else delete w.ceil; }); if (v>0){ S.wallDef.ceil=v; saveWallDef(); } };
   $('#pBase').value=W.base||'start'; if ($('#pLay')) $('#pLay').value=W.layMode||'auto';
   if ($('#pLay')) $('#pLay').onchange=e=>{ upd(w=>w.layMode=e.target.value); S.wallDef.layMode=e.target.value; saveWallDef(); };
   if ($('#pPlanDet')) $('#pPlanDet').onchange=e=>{ S.planDetail=e.target.checked; try{ localStorage.setItem('pdfmeasure:plandetail', S.planDetail?'1':'0'); }catch(_){} drawOv(); };
@@ -3219,6 +3228,57 @@ async function exportCsv(){
   if (rows.length<2){ toast('計測がありません'); return; }
   await saveFile(baseName()+'_計測一覧.csv', toCsv(rows));
 }
+// ---- dxf-takeoff の材料積算へ（作業データ JSON）----
+// 数量（スタッド・ランナー・ボード枚数・副資材・割増）は積算アプリの決まりで数える。ここからは壁の長さ・高さ・ボード高さ・開口・壁種だけを渡す。
+// 積算は「壁片が開口の所で切れている」前提なので、壁を開口の所で切って渡す（開口は 開口の上の面積 を持つ）。
+const DXF_SPEC={'a2k':'A2000WI','a2k-ac':'A2000WI_A','a2k-s':'A2000WI_S','a2k-me':'A2000WI_meto','a2k-sk':'A2000WI_shiki','a2k-sk-ac':'A2000WI_shiki_A','a2k-sk-s':'A2000WI_shiki_S','a2k-sk-me':'A2000WI_shiki_meto','a2k-60':'A2000WI_60','a2k-sk-60':'A2000WI_shiki_60','a2k-w2':'A2000WII','swa-w2':'SWAWII','swa-t':'SWAT',
+  's12w':'S12WI','s12w-ac':'S12WI_A','s12w-s':'S12WI_S','s12w-me':'S12WI_meto','s12w-sk':'S12WI_shiki','s12w-sk-ac':'S12WI_shiki_A','s12w-sk-s':'S12WI_shiki_S','s12w-sk-me':'S12WI_shiki_meto','s12t':'S12T',
+  'hwz':'HZWI','hwz-ac':'HZWI_A','hwz-s':'HZWI_S','hwz-me':'HZWI_meto','hwz-sk':'HZWI_shiki','hwz-sk-ac':'HZWI_shiki_A','hwz-sk-s':'HZWI_shiki_S','hwz-sk-me':'HZWI_shiki_meto','hwzt':'HZT',
+  'dr65':'Dreamy65','dr75':'Dreamy75','dr80':'Dreamy80','sw1':'Swall1','sw90':'Swall90','f-s12':'S12','f-s12-me':'S12meto','f-hwz':'HZ','f-hwz-me':'HZ_meto','f-b15':'B15','f-b15-me':'B15meto','f-gr1':'GR1','f-a60':'A60'};
+function takeoffWork(){
+  const head=['No','含む','番号','壁符号','種別','長さ(mm)','高さ(mm)','面積(m2)','建具/開口符号','開口幅(mm)','開口高さ(mm)','開口上面積(m2)','開口種別','始点X','始点Y','終点X','終点Y','ボード高さ(mm)','直交L(か所)'];
+  const rows=[head], syms=new Map(), wno=wallNoMap(), r1=v=>Math.round(v*10)/10, r3=v=>Math.round(v*1000)/1000;
+  const info={walls:0, pieces:0, ops:0, noScale:0, noSpec:0, changed:0, ceil:0, sill:0};
+  let no=0;
+  for (const m of wallList()){
+    const k=mmPer(m.page); if (k==null || !scaleOf(m.page)){ info.noScale++; continue; }
+    const c=computeWall(m), sys=c.sys, sym=sys? sys.name : '仕様未指定', W=m.wall;
+    if (!syms.has(sym)) syms.set(sym, {sym, legend: sys&&DXF_SPEC[sys.id]? {sys:DXF_SPEC[sys.id], a:'', b:'', lgs:1} : null});
+    if (!sys || !DXF_SPEC[sys.id]) info.noSpec++;
+    if (W.upBoard||W.lowBoard) info.changed++;
+    if (c.Hb<c.H) info.ceil++;
+    info.walls++;
+    const off=m.page*1e7;   // ページごとに座標を離す（積算は開口と壁片を近さで結ぶ）
+    const at=s=>{ const p=pointAt(m.pts, s/k); return {x:r1(p.x*k+off), y:r1(p.y*k)}; };
+    const nm=CIRC(wno.get(m.id))+' '+(m.name||'');
+    c.segs.forEach((g,i)=>{
+      // この辺から開口の所を抜いた区間
+      let parts=[[g.a,g.b]];
+      for (const o of c.ops){ const nx=[]; for (const [a,b] of parts){ if (o.e<=a||o.s>=b){ nx.push([a,b]); continue; } if (o.s>a) nx.push([a,o.s]); if (o.e<b) nx.push([o.e,b]); } parts=nx; }
+      parts.filter(([a,b])=>b-a>=1).forEach(([a,b],j)=>{ const p0=at(a), p1=at(b), L=b-a;
+        rows.push([++no,'○',nm,sym,'線分',r1(L),c.H,r3(L*c.Hb/1e6),'','','','','',p0.x,p0.y,p1.x,p1.y,c.Hb<c.H?c.Hb:'',(i>0&&j===0&&Math.abs(a-g.a)<1)?1:0]); info.pieces++; });
+    });
+    for (const o of c.ops){ const p0=at(o.s), p1=at(o.e), w=o.e-o.s, sill=+o.sill||0;
+      if (sill>0) info.sill++;
+      // 窓の下（腰）と上は、まとめて「開口の上」として渡す（積算は開口の上下を分けない）
+      const oh=Math.min(+o.h, c.Hb), oa=Math.max(0, c.Hb-oh)*w/1e6;
+      rows.push([++no,'○',nm,sym,'開口',r1(w),'','',o.mark||'',r1(w),r1(oh),r3(oa),isWindowMark(o.mark||'')?'窓':'開口',p0.x,p0.y,p1.x,p1.y,'','']); info.ops++; }
+  }
+  const work={format:'dxf-takeoff/作業データ', saved:new Date().toISOString(), from:'図面計測ツール', docs:[{name:S.name||''}], settings:{aLeg:false},
+    summary:{items:rows, walls:[...syms.values()].filter(w=>w.legend), rooms:[], chkLeft:0}};
+  return {work, info};
+}
+async function exportTakeoff(){
+  const {work, info}=takeoffWork();
+  if (!info.walls){ toast(info.noScale? '縮尺の決まっていないページの壁は書き出せません。先に縮尺を設定してください' : '高さを入れた壁がありません'); return; }
+  const ok=await saveFile(baseName()+'_積算用作業データ.json', new Blob([JSON.stringify(work)],{type:'application/json'}));
+  if (!ok) return;
+  const notes=[`壁 ${info.walls}本（壁片 ${info.pieces}・開口 ${info.ops}）`];
+  if (info.noSpec) notes.push(`壁種を積算で選ぶ必要がある壁 ${info.noSpec}本`);
+  if (info.changed) notes.push(`ボードを変えた壁 ${info.changed}本は、積算では認定仕様のボードで数えます`);
+  if (info.noScale) notes.push(`縮尺のないページの壁 ${info.noScale}本は外しました`);
+  showText('積算へ書き出しました', notes.join('\n')+'\n\n材料積算（dxf-takeoff）の「ファイルを開く」でこのファイルを選ぶと、積算の決まり（割付・ボード倍率・副資材）で数量が出ます。\n割増はボード倍率・下地倍率で積算側に入れてください。');
+}
 function openExport(){
   if (!S.W){ toast('先にファイルを開いてください'); return; }
   const np=[...Array(S.nPages).keys()].map(i=>i+1).filter(hasContent).length;
@@ -3227,9 +3287,10 @@ function openExport(){
     <button class="exb" id="exPdf"><b>📄 注釈付きPDF</b><small>${S.isPdf? `計測・書き込みのある ${np} ページに重ねた元のPDF（全${S.nPages}ページ）` : '画像の場合はPNGで保存'}</small></button>
     <button class="exb" id="exPng"><b>🖼 このページを画像（PNG）</b><small>${S.page}ページ。表示中の回転も反映</small></button>
     <button class="exb" id="exCsv"><b>📊 計測一覧（CSV）</b><small>全ページの計測・壁・部屋名。Excelでそのまま開けます</small></button>
+    <button class="exb" id="exTk"><b>🧮 積算へ（dxf-takeoff の作業データ）</b><small>壁の長さ・高さ・開口・壁種を、材料積算で開ける形（JSON）で保存。数量は積算の決まりで数えます</small></button>
    </div><div class="acts"><button class="btn" id="bCancel">閉じる</button></div>`;
   $('#bCancel').onclick=closeModal;
-  $('#exPdf').onclick=e=>{ closeModal(); exportPdf(); }; $('#exPng').onclick=()=>{ closeModal(); exportPng(); }; $('#exCsv').onclick=()=>{ closeModal(); exportCsv(); };
+  $('#exPdf').onclick=e=>{ closeModal(); exportPdf(); }; $('#exPng').onclick=()=>{ closeModal(); exportPng(); }; $('#exCsv').onclick=()=>{ closeModal(); exportCsv(); }; $('#exTk').onclick=()=>{ closeModal(); exportTakeoff(); };
   $('#modal').classList.add('show');
 }
 
@@ -3588,6 +3649,7 @@ function openWallBatch(opt={}){
      <div class="segb" id="wbScope"><button data-v="page">このページ</button><button data-v="all">全ページ</button></div>
      <span class="wbsep"></span>
      <label>高さ H <input class="inp" id="wbH" type="number" min="0" step="10" placeholder="変更しない"> mm</label>
+     <label title="入れるとボードは天井高＋100まで、LGSは高さHまで。0で「Hまで」に戻す">天井高 <input class="inp" id="wbCeil" type="number" min="0" step="10" placeholder="変更しない"> mm</label>
      <label>壁仕様 <select id="wbSys"><option value="__keep">変更しない</option>${sysOptions('__none').replace('<option value="">（仕様を指定しない）</option>','<option value="">仕様を指定しない</option>')}</select></label>
      <label>オプション <select id="wbOpt"><option value="__keep">変更しない</option><option value="">標準</option><option value="ac">アクリア仕様</option><option value="s">-S 生活音対策（サウンドカット）</option></select></label>
      <span class="wbsep"></span>
@@ -3604,7 +3666,7 @@ function openWallBatch(opt={}){
    </div>
    <div class="wbtbl" id="wbTbl"></div>
    <div id="wbSum"></div>
-   <div class="acts"><button class="btn" id="wbCopy">集計表をコピー</button><button class="btn" id="wbCsv">CSVで保存</button><button class="btn" id="wbDev">展開図（割付図）を表示</button><button class="btn pri" id="bCancel">閉じる</button></div>`;
+   <div class="acts"><button class="btn" id="wbCopy">集計表をコピー</button><button class="btn" id="wbCsv">CSVで保存</button><button class="btn" id="wbDev">展開図（割付図）を表示</button><button class="btn" id="wbTk" title="dxf-takeoff の材料積算で開ける作業データ（JSON）を保存">積算へ書き出し</button><button class="btn pri" id="bCancel">閉じる</button></div>`;
   const scopeList = () => lineMeasAll().filter(m=>WB.scope==='all' || m.page===S.page);
   const render=()=>{
     dlg.querySelectorAll('#wbScope button').forEach(b=>b.classList.toggle('on', b.dataset.v===WB.scope));
@@ -3625,7 +3687,7 @@ function openWallBatch(opt={}){
         <td class="no">${r.ok? CIRC(wno.get(m.id)) : ''}</td><td>${m.page}</td>
         <td class="nm"><span class="dot" style="background:${colOf(m)}"></span>${esc(m.name)}</td>
         <td>${mm(r.L)}${noSc?' <small class="warn" title="縮尺未設定">⚠</small>':''}</td>
-        <td><input class="hin${r.ok&&r.c.st&&r.c.st.over?' over':''}" data-f="h" type="number" min="0" step="10" value="${W.h||''}" placeholder="—" ${r.ok&&r.c.st&&r.c.st.over?`title="この仕様の目安の高さ（〜${r.c.st.maxH}mm）を超えています"`:''}>${r.ok&&r.c.st&&r.c.st.over?'<small class="warn" title="高さが仕様の目安を超えています">⚠</small>':''}</td>
+        <td><input class="hin${r.ok&&r.c.st&&r.c.st.over?' over':''}" data-f="h" type="number" min="0" step="10" value="${W.h||''}" placeholder="—" ${r.ok&&r.c.st&&r.c.st.over?`title="この仕様の目安の高さ（〜${r.c.st.maxH}mm）を超えています"`:''}>${r.ok&&r.c.st&&r.c.st.over?'<small class="warn" title="高さが仕様の目安を超えています">⚠</small>':''}${r.ok&&r.c.Hb<r.c.H?`<br><small title="天井高＋100で止める">ボード〜${r.c.Hb.toLocaleString()}</small>`:''}</td>
         <td><select data-f="sys"><option value="">${m.wall?'仕様未指定':'—（壁にしない）'}</option>${sysOptions(W.sys||'').replace('<option value="">（仕様を指定しない）</option>','')}</select>${m.wall&&wallOpts(W.sys).length?`<select data-f="opt" class="opt"><option value="">標準</option>${wallOpts(W.sys).map(o=>`<option value="${o}" ${W.opt===o?'selected':''}>${o==='ac'?'アクリア':'-S'}</option>`).join('')}</select>`:''}</td>
         <td class="ori">${r.ok? oriTxt(r.c, W) : ''}</td>
         <td>${r.ok&&r.nop? r.nop : ''}</td>
@@ -3656,15 +3718,16 @@ function openWallBatch(opt={}){
   };
   const closeDlg=()=>{ closeModal(); dlg.classList.remove('wide'); };
   dlg.querySelectorAll('#wbScope button').forEach(b=>b.onclick=()=>{ WB.scope=b.dataset.v; render(); });
-  $('#wbH').onkeydown=$('#wbPitch').onkeydown=e=>{ e.stopPropagation(); if (e.key==='Enter') $('#wbApply').click(); };
+  $('#wbH').onkeydown=$('#wbPitch').onkeydown=$('#wbCeil').onkeydown=e=>{ e.stopPropagation(); if (e.key==='Enter') $('#wbApply').click(); };
   $('#wbRule').onchange=e=>{ setWallRule(e.target.checked? 0.5 : 0); render(); };
   $('#wbApply').onclick=()=>{
     const ids=[...WB.sel]; if (!ids.length){ toast('表の左のチェックで線分を選んでください'); return; }
     let hv=$('#wbH').value===''? null : +$('#wbH').value; const sv=$('#wbSys').value, ov=$('#wbOpt').value, bv=$('#wbBase').value;
     let pv=$('#wbPitch').value===''? null : +$('#wbPitch').value; const olv=$('#wbOL').value, ouv=$('#wbOU').value, lyv=$('#wbLay').value;
+    const cv=$('#wbCeil').value===''? null : +$('#wbCeil').value;
     if (pv!=null && pv>0 && pv<10) pv=Math.round(pv*1000); if (pv!=null && pv!==0 && !(pv>=100 && pv<=1200)){ toast('スタッド間隔は 100〜1200mm（0＝仕様の標準）で入力してください'); return; }
     if (hv!=null && hv!==0){ const nh=normH(hv); if (!nh) return; hv=nh; }
-    if (hv==null && pv==null && sv==='__keep' && ov==='__keep' && bv==='__keep' && olv==='__keep' && ouv==='__keep' && lyv==='__keep'){ toast('高さ・仕様などの設定値を入力してください'); return; }
+    if (hv==null && pv==null && cv==null && sv==='__keep' && ov==='__keep' && bv==='__keep' && olv==='__keep' && ouv==='__keep' && lyv==='__keep'){ toast('高さ・仕様などの設定値を入力してください'); return; }
     pushUndo(); let n=0, skip=0;
     for (const m of lineMeasAll().filter(x=>WB.sel.has(x.id))){
       if (!m.wall){ if (!(hv>0) && (sv==='__keep'||!sv)){ skip++; continue; } m.wall=newWallObj(); if (hv==null) m.wall.h=0; wallRename(m); }
@@ -3677,7 +3740,9 @@ function openWallBatch(opt={}){
       if (olv!=='__keep'){ m.wall.orientLow=olv; delete m.wall.orient; }
       if (lyv!=='__keep') m.wall.layMode=lyv;
       if (ouv!=='__keep'){ m.wall.orientUp=ouv; delete m.wall.orient; }
+      if (cv!=null){ if (cv>0) m.wall.ceil=cv; else delete m.wall.ceil; }
       n++; }
+    if (cv>0){ S.wallDef.ceil=cv; }
     renumberWallNames();
     if (hv>0){ S.wallDef.h=hv; } if (sv!=='__keep'){ S.wallDef.sys=sv; } saveWallDef();
     save(); afterWallEdit(); render(); toast(`${n}本の線分に設定しました${skip?`（高さ未入力の${skip}本はスキップ）`:''}`);
@@ -3695,6 +3760,7 @@ function openWallBatch(opt={}){
   $('#wbCopy').onclick=async()=>{ const t=tsv(); try{ await navigator.clipboard.writeText(t); toast('集計表をコピーしました（Excelに貼り付け可）'); }catch(e){ showText('壁 集計表', t); } };
   $('#wbCsv').onclick=async()=>{ const rows=wallTableRows(scopeList()); await saveFile(baseName()+'_壁面積集計.csv', toCsv(rows)); };
   $('#wbDev').onclick=()=>{ const sel=lineMeasAll().filter(m=>WB.sel.has(m.id)&&wallOk(m)); openDevView({ids: (sel.length? sel : scopeList().filter(wallOk)).map(m=>m.id), back:true}); };
+  $('#wbTk').onclick=()=>exportTakeoff();
   $('#bCancel').onclick=closeDlg;
   render(); $('#modal').classList.add('show');
 }
@@ -4053,6 +4119,7 @@ setTool('dist'); resize(); refreshAll();
 $('#hint').textContent='PDFまたは画像を開いてください（ドラッグ＆ドロップ可）';
 tryResume().catch(e=>{ console.warn('resume',e); busy(''); renderRecentCard(); });
 window.__S=S;
+window.__zk={computeWall, wallRow, takeoffWork, wallList, refreshProps, openWallBatch};   // 試験用（test/link.mjs）
 })();
 </script>
 </body>
