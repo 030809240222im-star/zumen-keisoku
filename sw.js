@@ -1,10 +1,11 @@
 // 図面計測ツール Service Worker — オフライン起動用
 // ・保存するのはアプリ本体と決まったファイルだけ（他の画面や画像をアプリとして保存しない）
 // ・電波が弱いときは 3.5 秒で保存済みのアプリから起動し、裏で最新版を取り込む
-// ・Cloudflare Access のログイン画面（リダイレクト）は保存しない
-const VER='zumen-v9';
+// ・Cloudflare Access のログイン画面（リダイレクト）は保存しない。?fresh= 付きで開いたとき（ログインし直し）は保存版を使わない
+// ・PDFライブラリはアプリと同じ場所（lib/）のものを保存する（CDN は Claude 上などの予備）
+const VER='zumen-v10';
 const SCOPE=new URL('./', self.location).href;
-const CORE=['./','./index.html','./cmaps-ja.json','./manifest.webmanifest','./icon-192.png','./icon-512.png','./apple-touch-icon.png'].map(u=>new URL(u, SCOPE).href);
+const CORE=['./','./index.html','./cmaps-ja.json','./manifest.webmanifest','./icon-192.png','./icon-512.png','./apple-touch-icon.png','./lib/pdf.min.js','./lib/pdf.worker.min.js','./lib/pdf-lib.min.js'].map(u=>new URL(u, SCOPE).href);
 const LIBS=['https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
   'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js'];
@@ -24,6 +25,7 @@ self.addEventListener('fetch', e=>{
   if (r.mode==='navigate'){
     const path=u.origin+u.pathname;
     if (!APP_URLS.has(path)) return;                                                   // アプリ以外の画面には関与しない
+    if (u.searchParams.has('fresh')) return;                                           // ログインし直し：必ず通信する
     const net=fetch(r).then(res=>{ if (okToCache(res) && isHtml(res)){ const c=res.clone(); caches.open(VER).then(x=>x.put(SCOPE+'index.html',c)); } return res; });
     e.respondWith(caches.match(SCOPE+'index.html').then(cached=>{
       if (!cached) return net;
@@ -31,7 +33,7 @@ self.addEventListener('fetch', e=>{
       return Promise.race([net, timeout(3500)]).catch(()=>cached);                     // 弱い電波でも待たせない
     }));
     return; }
-  const same=u.origin===location.origin && CORE.includes(u.origin+u.pathname);
+  const same=u.origin===location.origin && (CORE.includes(u.origin+u.pathname) || u.href.startsWith(SCOPE+'lib/cmaps/'));
   if (!same && !lib) return;                                                           // 決まったファイル以外は保存しない
   e.respondWith(caches.match(u.href).then(m=>m||fetch(r).then(res=>{ if (okToCache(res)){ const c=res.clone(); caches.open(VER).then(x=>x.put(u.href,c)); } return res; })));
 });

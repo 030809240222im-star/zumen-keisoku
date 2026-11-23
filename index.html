@@ -13,8 +13,10 @@
 <link rel="icon" type="image/png" href="icon-192.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 
+<meta name="referrer" content="no-referrer">
 <title>図面計測</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- PDFライブラリはアプリと同じ場所（lib/）から読む。無いとき（Claude 上など）だけ、改ざん検査（SRI）付きで CDN から読む -->
+<script src="lib/pdf.min.js"></script>
 <style>
 :root{
   --bg:#14171c; --panel:#1b1f26; --panel2:#222731; --line:#2e3542; --text:#e6e9ef; --muted:#8b94a5;
@@ -581,8 +583,21 @@ header .grp{border-right:1px solid var(--line)} header .grp:last-child{border-ri
 <script>
 (() => {
 'use strict';
-const pdfjsLib = window.pdfjsLib;
-if (pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+// ---- 外部ライブラリ：アプリと同じ場所（lib/）が先。無いときだけ CDN（改ざん検査 SRI 付き）----
+const LIBS={
+  pdfjs:{local:'lib/pdf.min.js', cdn:'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', sri:'sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e'},
+  worker:{local:'lib/pdf.worker.min.js', cdn:'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js', sri:'sha384-SnzOobpRMLXZ52iJvZm/C0fYw0OQemTXzTjIsdsfMcrCtCEe9qgzxTd3RSklO5x2'},
+  pdflib:{local:'lib/pdf-lib.min.js', cdn:'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js', sri:'sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI'},
+};
+function loadScript(src, sri){ return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; if (sri){ s.integrity=sri; s.crossOrigin='anonymous'; } s.onload=res; s.onerror=()=>{ s.remove(); rej(new Error('読み込めません：'+src)); }; document.head.appendChild(s); }); }
+let pdfjsLib = window.pdfjsLib || null;
+const setPdfWorker = local => { pdfjsLib.GlobalWorkerOptions.workerSrc = local? new URL(LIBS.worker.local, location.href).href : LIBS.worker.cdn; };
+if (pdfjsLib) setPdfWorker(true);
+async function ensurePdfjs(){
+  if (pdfjsLib) return pdfjsLib;
+  try{ await loadScript(LIBS.pdfjs.cdn, LIBS.pdfjs.sri); }catch(e){}
+  pdfjsLib = window.pdfjsLib || null; if (pdfjsLib) setPdfWorker(false);
+  return pdfjsLib; }
 
 const $ = s => document.querySelector(s);
 const app = $('#app'), stage = $('#stage'), bg = $('#bg'), ov = $('#ov');
@@ -623,7 +638,9 @@ const S = {
 // ---------- utils ----------
 const toast = (msg) => { const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast.t); toast.t=setTimeout(()=>t.classList.remove('show'),1800); };
 const busy = (msg) => { const b=$('#busy'); b.textContent=msg||''; b.style.display=msg?'block':'none'; };
-const esc = s => String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc = s => String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// 保存済みの縮小画像は、アプリが作った data:image だけを表示に使う
+const safeImg = u => typeof u==='string' && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(u) && u.length<4e6 ? u : '';
 const d2 = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
 // view rotation (clockwise, 90° steps). world = unrotated page coords; "R" = rotated view coords
 const rot = () => (S.rots[S.page]||0);
@@ -724,7 +741,11 @@ let _cmapPromise=null;
 function loadJaCMaps(){ if (!_cmapPromise) _cmapPromise=fetch(new URL('cmaps-ja.json', location.href).href).then(r=>{ if(!r.ok) throw new Error('cmap '+r.status); return r.json(); }).catch(e=>{ console.warn('CMap読込失敗（CDNから取得します）', e); return {}; }); return _cmapPromise; }
 const CMAP_CDN='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/';
 class JaCMapFactory{ constructor(){ } async fetch({name}){ const all=await loadJaCMaps(); const b=all[name];
-    if (!b){ const r=await fetch(CMAP_CDN+name+'.bcmap'); if (!r.ok) throw new Error('CMap not available: '+name); return {cMapData:new Uint8Array(await r.arrayBuffer()), compressionType:1}; } const bin=atob(b); const u=new Uint8Array(bin.length); for (let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return {cMapData:u, compressionType:1}; } }
+    if (!b){ // 名前は PDF の中から来るので、決まった文字だけを通す（../ や ? で別の場所を読ませない）
+      if (!/^[A-Za-z0-9][A-Za-z0-9_+-]{0,63}$/.test(String(name))) throw new Error('CMap not available');
+      let r=null; try{ r=await fetch(new URL('lib/cmaps/'+name+'.bcmap', location.href).href); }catch(e){}
+      if (!r || !r.ok) r=await fetch(CMAP_CDN+name+'.bcmap');
+      if (!r.ok) throw new Error('CMap not available: '+name); return {cMapData:new Uint8Array(await r.arrayBuffer()), compressionType:1}; } const bin=atob(b); const u=new Uint8Array(bin.length); for (let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return {cMapData:u, compressionType:1}; } }
 // ---------- loading ----------
 async function openFile(f, opts={}){
   if (!f) return;
@@ -763,7 +784,7 @@ function fileErrMsg(e){ const n=e&&e.name, m=(e&&e.message)||String(e);
 async function preloadFile(f){
   const isPdf = f.type==='application/pdf' || /\.pdf$/i.test(f.name);
   if (isPdf){
-    if (!window.pdfjsLib) throw new Error('PDFライブラリを読み込めませんでした（通信環境を確認してください）');
+    if (!(await ensurePdfjs())) throw new Error('PDFライブラリを読み込めませんでした（通信環境を確認してください）');
     if (f.size>300*1024*1024) throw new Error('ファイルが大きすぎます（300MBまで）');
     const buf=await f.arrayBuffer(); const bytes=buf.slice(0);
     const task=pdfjsLib.getDocument({...PDF_OPTS, data:buf});
@@ -3158,7 +3179,9 @@ function dictToggle(btn, target){
 function dictStop(){ if (CAP.dictation && document.querySelector('.mic.rec')) CAP.dictation.stop().catch(()=>{}); }
 
 // ---- 書き出し ----
-async function loadPdfLib(){ if (window.PDFLib) return window.PDFLib; await new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js'; s.onload=res; s.onerror=()=>rej(new Error('pdf-libを読み込めませんでした')); document.head.appendChild(s); }); return window.PDFLib; }
+async function loadPdfLib(){ if (window.PDFLib) return window.PDFLib;
+  try{ await loadScript(LIBS.pdflib.local); }catch(e){ try{ await loadScript(LIBS.pdflib.cdn, LIBS.pdflib.sri); }catch(e2){ throw new Error('pdf-libを読み込めませんでした'); } }
+  if (!window.PDFLib) throw new Error('pdf-libを読み込めませんでした'); return window.PDFLib; }
 function hasContent(n){ return (S.meas[n]||[]).length || (S.ann[n]||[]).length; }
 function renderOverlayFor(n, W, H, sc){
   const c=document.createElement('canvas'); c.width=Math.ceil(W*sc); c.height=Math.ceil(H*sc); const ctx=c.getContext('2d');
@@ -3539,7 +3562,7 @@ async function openHistory(tab){
       await snapshot('復元する前の状態'); pushUndo(); const j=JSON.parse(s.state); applyLoaded({...j}); S.sel=null; clearSel(); save(); cloudMarkAll(); refreshAll(); drawAnn(); closeModal(); toast(`${new Date(s.t).toLocaleString('ja-JP')} の状態に戻しました（元に戻す可）`); });
   } else {
     const r=(await idbGet('session','recent')) || {list:[]};
-    body.innerHTML = r.list.length? r.list.map(e=>`<div class="hrow rf ${e.key===S.key?'cur':''}">${e.thumb?`<img src="${e.thumb}" alt="">`:'<span class="noimg">PDF</span>'}<span class="hs"><b>${esc(e.name)}</b><br>${e.n?`${e.page||1}/${e.n}ページ・`:''}計測 ${e.m||0}・書込 ${e.a||0}<br><small>${fmtWhen(e.t).replace('<small>','（').replace('</small>','）')}</small></span>
+    body.innerHTML = r.list.length? r.list.map(e=>`<div class="hrow rf ${e.key===S.key?'cur':''}">${safeImg(e.thumb)?`<img src="${safeImg(e.thumb)}" alt="">`:'<span class="noimg">PDF</span>'}<span class="hs"><b>${esc(e.name)}</b><br>${e.n?`${e.page||1}/${e.n}ページ・`:''}計測 ${e.m||0}・書込 ${e.a||0}<br><small>${fmtWhen(e.t).replace('<small>','（').replace('</small>','）')}</small></span>
       ${e.key===S.key? '<span class="pmini">表示中</span>' : e.hasFile? `<button class="mini" data-of="${esc(e.key)}">開く</button>` : '<span class="pmini">ファイル未保存</span>'}<button class="x" data-df="${esc(e.key)}" title="この端末から削除">✕</button></div>`).join('')
       : '<div class="pmini" style="padding:8px">まだありません。</div>';
     body.querySelectorAll('[data-of]').forEach(b=>b.onclick=async()=>{ closeModal(); await openStored(b.dataset.of); });
@@ -3555,7 +3578,7 @@ async function openStored(key){ const rec=await idbGet('files', key); if (!rec |
 async function renderRecentCard(){
   const box=$('#recentBox'); if (!box) return; const r=(await idbGet('session','recent')); const list=(r&&r.list||[]).filter(e=>e.hasFile).slice(0,5);
   if (!list.length){ box.innerHTML=''; return; }
-  box.innerHTML='<div class="rtitle">最近のファイル（この端末に保存済み）</div>'+list.map(e=>`<button class="rbtn" data-of="${esc(e.key)}">${e.thumb?`<img src="${e.thumb}" alt="">`:'<span class="noimg">PDF</span>'}<span><b>${esc(e.name)}</b><small>${e.n?`${e.page||1}/${e.n}p・`:''}計測${e.m||0}・書込${e.a||0}・${new Date(e.t).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small></span></button>`).join('');
+  box.innerHTML='<div class="rtitle">最近のファイル（この端末に保存済み）</div>'+list.map(e=>`<button class="rbtn" data-of="${esc(e.key)}">${safeImg(e.thumb)?`<img src="${safeImg(e.thumb)}" alt="">`:'<span class="noimg">PDF</span>'}<span><b>${esc(e.name)}</b><small>${e.n?`${e.page||1}/${e.n}p・`:''}計測${e.m||0}・書込${e.a||0}・${new Date(e.t).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small></span></button>`).join('');
   box.querySelectorAll('[data-of]').forEach(b=>b.onclick=()=>openStored(b.dataset.of));
 }
 // ---- 起動時：直前の作業を自動で再開 ----
@@ -3910,14 +3933,61 @@ if (STANDALONE && 'serviceWorker' in navigator && /^https?:$/.test(location.prot
   }).catch(()=>{}); });
 }
 
-// ---- Cloudflare Access で保護されたサイトのとき：ログイン中のメールとログアウトを表示 ----
-if (STANDALONE && /^https?:$/.test(location.protocol)) {
-  fetch('/cdn-cgi/access/get-identity', {credentials:'include'}).then(r=>r.ok? r.json() : null).then(j=>{
-    if (!j || !j.email) return; const ft=$('#saveSt') && $('#saveSt').parentNode; if (!ft) return;
-    const w=document.createElement('span'); w.id='who'; w.style.cssText='margin-left:10px;color:var(--muted);white-space:nowrap;cursor:pointer';
-    w.title='クリックでログアウト'; w.textContent='👤 '+j.email; w.onclick=()=>{ if (confirm(j.email+' からログアウトしますか？')) location.href='/cdn-cgi/access/logout'; };
-    ft.insertBefore(w, $('#saveSt').nextSibling);
-  }).catch(()=>{});
+// ---- Cloudflare Access（登録したメールの人だけが使える公開）のとき ----
+// ・ログイン中のメールを出し、ログアウト（この端末のデータも消すか選べる）
+// ・電波があるときにログインの期限切れ・登録の取り消しを確かめ、入口（ログイン）へ戻す。図面のデータは端末に残る
+// ・一度でもログインを確かめたサイトだけで働く（GitHub Pages や Claude 上では何もしない）
+const ACCESS_SEEN='pdfmeasure:access';
+async function accessIdentity(){
+  try{ const r=await fetch('/cdn-cgi/access/get-identity', {credentials:'include', redirect:'manual', cache:'no-store'});
+    if (r.type==='opaqueredirect' || r.status===401 || r.status===403) return {out:true};
+    if (!r.ok) return null; const j=await r.json().catch(()=>null); return j && j.email? {email:String(j.email)} : null;
+  }catch(e){ return null; } }   // 電波なし・Access の無いサイト
+async function eraseDeviceData(){
+  try{ const db=await Promise.race([AS.dbp, new Promise(r=>setTimeout(r,1500))]); if (db && db.close) db.close(); }catch(e){}   // 開いたままだと消せない
+  try{ for (const k of Object.keys(localStorage)) if (k.startsWith('pdfmeasure:')) localStorage.removeItem(k); }catch(e){}
+  try{ sessionStorage.clear(); }catch(e){}
+  await new Promise(res=>{ try{ const q=indexedDB.deleteDatabase('pdfmeasure'); q.onsuccess=q.onerror=q.onblocked=()=>res(); }catch(e){ res(); } });
+  try{ for (const k of await caches.keys()) if (k.startsWith('zumen-')) await caches.delete(k); }catch(e){}
+  try{ for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); }catch(e){}
+}
+function openAccount(email){
+  $('#dlg').innerHTML=`<h3>👤 ログイン中</h3><p class="sub">${esc(email)}</p>
+   <div class="exl"><button class="exb" id="acOut"><b>ログアウト</b><small>この端末の図面・計測・書き込みは残ります（次にログインした時に続けられます）</small></button>
+   <button class="exb" id="acErase"><b class="dng">ログアウトして、この端末のデータを消す</b><small>共用の端末・人に貸す端末で使ったとき。図面・計測・書き込み・履歴を消します（元に戻せません）</small></button></div>
+   <div class="acts"><button class="btn pri" id="bCancel">閉じる</button></div>`;
+  $('#bCancel').onclick=closeModal;
+  $('#acOut').onclick=()=>{ location.href='/cdn-cgi/access/logout'; };
+  $('#acErase').onclick=async()=>{ if (!confirm('この端末に保存した図面・計測・書き込み・履歴をすべて消してログアウトします。元に戻せません。よろしいですか？')) return;
+    S.key=null; clearTimeout(AS.timer); clearTimeout(AS.sessTimer);   // 消した後に自動保存で書き戻さない
+    busy('この端末のデータを消しています…'); await eraseDeviceData(); location.href='/cdn-cgi/access/logout'; };
+  $('#modal').classList.add('show');
+}
+function accessLocked(){
+  if ($('#accessLock')) return; save();
+  const d=document.createElement('div'); d.id='accessLock';
+  d.style.cssText='position:fixed;inset:0;z-index:50;background:#0b0d10f2;display:flex;align-items:center;justify-content:center;padding:16px';
+  d.innerHTML=`<div style="max-width:420px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;line-height:1.7">
+    <h3 style="margin:0 0 8px">もう一度ログインしてください</h3>
+    <p style="margin:0 0 14px;color:var(--muted)">ログインの有効期限が切れたか、管理者が利用を止めました。図面・計測のデータはこの端末に残っています。</p>
+    <button class="btn pri" id="accessRe" style="width:100%">ログインの画面へ</button></div>`;
+  document.body.appendChild(d);
+  $('#accessRe').onclick=()=>{ location.href=new URL('./?fresh='+Date.now(), location.href).href; };   // fresh：Service Worker の保存版を使わない
+}
+async function accessCheck(){
+  if (!STANDALONE || location.protocol!=='https:' || !navigator.onLine) return;
+  const id=await accessIdentity(); let seen=false; try{ seen=localStorage.getItem(ACCESS_SEEN)==='1'; }catch(e){}
+  if (id && id.email){ try{ localStorage.setItem(ACCESS_SEEN,'1'); }catch(e){}
+    if (!$('#who')){ const ft=$('#saveSt') && $('#saveSt').parentNode; if (ft){ const w=document.createElement('span'); w.id='who'; w.style.cssText='margin-left:10px;color:var(--muted);white-space:nowrap;cursor:pointer';
+      w.title='ログアウト・この端末のデータを消す'; w.textContent='👤 '+id.email; w.onclick=()=>openAccount(id.email); ft.insertBefore(w, $('#saveSt').nextSibling); } }
+    return; }
+  if (id && id.out && seen) accessLocked();
+}
+if (STANDALONE && location.protocol==='https:'){
+  if (/[?&]fresh=/.test(location.search)) try{ history.replaceState(null,'',location.pathname); }catch(e){}
+  accessCheck();
+  document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState==='visible') accessCheck(); });
+  setInterval(accessCheck, 30*60*1000);
 }
 // ===================== 連続曲線（R切替・直線への切替点ごとに区間を分けて計測） =====================
 const sameCircleT = (a,b) => a && b && Math.hypot(a.x-b.x,a.y-b.y) < Math.max(a.r,b.r)*0.006 + 0.05 && Math.abs(a.r-b.r) < Math.max(a.r,b.r)*0.006 + 0.05;

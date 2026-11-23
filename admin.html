@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<title>利用者の管理 — 図面計測</title>
+<link rel="icon" type="image/png" href="icon-192.png">
+<style>
+:root{--bg:#14171c;--panel:#1b1f26;--panel2:#222731;--line:#2e3542;--text:#e6e9ef;--muted:#8b94a5;--accent:#4da3ff;--bad:#ff8a8a;--ok:#7fd88f}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 "Hiragino Sans","Yu Gothic UI","Meiryo",system-ui,sans-serif}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+header h1{font-size:17px;margin:0}
+header .me{color:var(--muted);margin-left:auto}
+a{color:var(--accent)}
+main{max-width:980px;margin:0 auto;padding:16px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+h2{font-size:15px;margin:0 0 10px}
+textarea,input[type=text],input[type=search]{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:8px;font:inherit}
+textarea{min-height:84px;resize:vertical}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.row>input{flex:1;min-width:200px}
+button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px 14px;font:inherit;cursor:pointer;min-height:36px}
+button.pri{background:var(--accent);border-color:var(--accent);color:#06121f;font-weight:700}
+button.dng{color:var(--bad)}
+button:disabled{opacity:.45;cursor:default}
+.msg{margin-top:8px;white-space:pre-wrap}
+.msg.ok{color:var(--ok)} .msg.bad{color:var(--bad)}
+.mu{color:var(--muted);font-size:12.5px}
+.tblw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{color:var(--muted);font-weight:600;white-space:nowrap}
+td.em{word-break:break-all}
+td.memo input{min-width:140px;padding:5px 6px}
+.pill{display:inline-block;font-size:11.5px;padding:0 7px;border-radius:9px;border:1px solid var(--accent);color:var(--accent);margin-left:6px}
+.log li{margin:2px 0}
+.empty{color:var(--muted);padding:10px 0}
+</style>
+</head>
+<body>
+<header><h1>図面計測ツール — 利用者の管理</h1><a href="/">アプリを開く</a><span class="me" id="me"></span></header>
+<main>
+  <section>
+    <h2>利用者を登録する</h2>
+    <textarea id="emails" placeholder="メールアドレス（改行・カンマ区切りで、まとめて入れられます）&#10;例）tanaka@example.co.jp"></textarea>
+    <div class="row"><input type="text" id="memo" maxlength="100" placeholder="メモ（会社名・氏名など。任意）"><button class="pri" id="add">登録する</button></div>
+    <div class="msg" id="addMsg"></div>
+    <p class="mu">登録した人は、アプリのアドレスを開いてメールアドレスを入れると、届いた6桁のコードでログインできます。登録していないメールアドレスにはコードが届かず、使えません。</p>
+  </section>
+
+  <section>
+    <h2>利用者の一覧 <span class="mu" id="count"></span></h2>
+    <div class="row" style="margin-top:0"><input type="search" id="q" placeholder="メール・メモで探す"><button id="invite">招待の文面をコピー</button><button id="reload">最新にする</button></div>
+    <div class="msg" id="listMsg"></div>
+    <div class="tblw"><table><thead><tr><th>メールアドレス</th><th>メモ</th><th>登録日</th><th>登録した人</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>
+    <p class="mu" id="kvNote"></p>
+  </section>
+
+  <section id="logSec" hidden>
+    <h2>最近の操作</h2>
+    <ul class="log mu" id="log"></ul>
+  </section>
+
+  <section>
+    <h2>知っておくこと</h2>
+    <ul class="mu">
+      <li>削除すると、その人のログイン中のセッションもすぐに切れます。端末に保存された図面のデータはその人の端末に残ります。</li>
+      <li>Cloudflare Zero Trust の無料プランで使えるのは 50 人までです（一度ログインした人の数）。削除した人の枠は、Cloudflare の Zero Trust →「ユーザー」で外すと空きます。</li>
+      <li>管理者（ADMIN_EMAILS）は、この画面からは削除できません。</li>
+    </ul>
+  </section>
+</main>
+<script>
+(()=>{
+'use strict';
+const $=s=>document.querySelector(s);
+const API='/api/admin/members';
+let D=null;
+function el(tag, props={}, ...kids){ const e=document.createElement(tag); for (const [k,v] of Object.entries(props)){ if (k==='class') e.className=v; else if (k in e) e[k]=v; else e.setAttribute(k,v); } for (const k of kids) e.append(k); return e; }
+function setMsg(id, text, kind){ const m=$(id); m.textContent=text||''; m.className='msg'+(kind?' '+kind:''); }
+async function call(method, body){
+  const opt={method, headers:{'X-Zumen-Admin':'1'}, credentials:'same-origin', cache:'no-store'};
+  if (body){ opt.headers['Content-Type']='application/json'; opt.body=JSON.stringify(body); }
+  let r; try{ r=await fetch(API, opt); }catch(e){ throw new Error('つながりませんでした。電波を確認してください'); }
+  const j=await r.json().catch(()=>null);
+  if (!r.ok) throw new Error((j&&j.error)||('うまくいきませんでした（'+r.status+'）'));
+  return j;
+}
+const day=t=>{ if (!t) return ''; const d=new Date(t); return isNaN(d)? '' : `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`; };
+function inviteText(email){
+  return `図面計測ツールの利用登録をしました。\n\n1. 次のアドレスを開きます\n   ${D? D.appUrl : location.origin+'/'}\n2. メールアドレスの欄に ${email||'登録したメールアドレス'} を入れて、コードを送ります\n3. メールで届いた6桁のコードを入れると使えます（コードは約10分で切れます）\n\nスマホ・タブレットは「ホーム画面に追加」すると、アプリのように使えます。\n図面と計測のデータは、使う端末の中だけに保存され、外には送られません。`;
+}
+async function copy(text){ try{ await navigator.clipboard.writeText(text); setMsg('#listMsg','招待の文面をコピーしました。メールやチャットに貼り付けて送ってください','ok'); }catch(e){ prompt('この文面をコピーしてください', text); } }
+function render(){
+  if (!D) return;
+  $('#me').textContent='ログイン中：'+D.me;
+  const q=$('#q').value.trim().toLowerCase();
+  const list=D.members.filter(m=>!q || m.email.includes(q) || (m.memo||'').toLowerCase().includes(q));
+  $('#count').textContent=`（${D.members.length}人${D.other?`・メール以外の条件 ${D.other}件`:''}）`;
+  const tb=$('#tb'); tb.textContent='';
+  if (!list.length) tb.append(el('tr',{},el('td',{colSpan:5,class:'empty'}, q? '見つかりません' : 'まだ登録がありません')));
+  for (const m of list){
+    const tr=el('tr');
+    const em=el('td',{class:'em'}, m.email); if (m.admin) em.append(el('span',{class:'pill'},'管理者'));
+    let memo;
+    if (D.kv){ const inp=el('input',{type:'text', value:m.memo||'', maxLength:100, placeholder:'—'});
+      inp.onchange=async()=>{ try{ D=await call('PATCH',{email:m.email, memo:inp.value}); setMsg('#listMsg','メモを保存しました','ok'); render(); }catch(e){ setMsg('#listMsg',e.message,'bad'); } };
+      memo=el('td',{class:'memo'},inp); }
+    else memo=el('td',{class:'mu'},'—');
+    const ops=el('td'); const inv=el('button',{title:'この人あての招待の文面をコピー'},'招待文'); inv.onclick=()=>copy(inviteText(m.email)); ops.append(inv,' ');
+    const del=el('button',{class:'dng', disabled:m.admin, title:m.admin?'管理者は削除できません':'登録を外し、ログイン中のセッションも切ります'},'削除');
+    del.onclick=async()=>{ if (!confirm(m.email+' の登録を外します。この人はすぐに使えなくなります。よろしいですか？')) return;
+      del.disabled=true; try{ D=await call('DELETE',{email:m.email}); setMsg('#listMsg', m.email+' を削除しました'+(D.revoked?'（ログイン中のセッションも切りました）':'（セッションを切れませんでした。期限が来ると使えなくなります）'),'ok'); render(); }catch(e){ del.disabled=false; setMsg('#listMsg',e.message,'bad'); } };
+    ops.append(del);
+    tr.append(em, memo, el('td',{class:'mu'},day(m.addedAt)), el('td',{class:'mu em'},m.addedBy||''), ops); tb.append(tr);
+  }
+  $('#kvNote').textContent = D.kv? '' : 'メモ・登録日・操作の記録を残すには、Cloudflare Pages に KV（名前 ZUMEN_KV）を結び付けます（手順書を参照）。';
+  $('#logSec').hidden=!D.kv || !D.log.length; const lg=$('#log'); lg.textContent='';
+  for (const x of D.log) lg.append(el('li',{}, `${day(x.t)} ${new Date(x.t).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}　${x.act}　${x.email}　（${x.by}）`));
+}
+async function load(){ setMsg('#listMsg','読み込んでいます…'); try{ D=await call('GET'); setMsg('#listMsg',''); render(); }catch(e){ setMsg('#listMsg',e.message,'bad'); } }
+$('#add').onclick=async()=>{
+  const text=$('#emails').value; if (!text.trim()){ setMsg('#addMsg','メールアドレスを入れてください','bad'); return; }
+  $('#add').disabled=true; setMsg('#addMsg','登録しています…');
+  try{ D=await call('POST',{text, memo:$('#memo').value});
+    const parts=[]; if (D.added.length) parts.push(`${D.added.length}人を登録しました：${D.added.join('、')}`); if (D.already.length) parts.push(`登録済み：${D.already.join('、')}`); if (D.invalid.length) parts.push(`形が正しくないため外しました：${D.invalid.join('、')}`);
+    setMsg('#addMsg', parts.join('\n'), D.added.length?'ok':(D.invalid.length?'bad':'')); if (D.added.length){ $('#emails').value=''; $('#memo').value=''; } render();
+  }catch(e){ setMsg('#addMsg',e.message,'bad'); }
+  finally{ $('#add').disabled=false; }
+};
+$('#q').oninput=render; $('#reload').onclick=load; $('#invite').onclick=()=>copy(inviteText(''));
+load();
+})();
+</script>
+</body>
+</html>
