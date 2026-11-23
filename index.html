@@ -2662,7 +2662,11 @@ function noteDown(e, sp){
   }
   if (t==='tape'){ S.tapeDrag={start:w, cur:w}; return; }
   if (t==='laser'){ S.laser.push({x:sp.x,y:sp.y,t:performance.now()}); laserLoop(); return; }
-  // text / stamp / note は離したとき
+  // 文字・スタンプ・付箋：そのままドラッグで移動、タップで編集／配置（離したときに判定）
+  if (t==='text'||t==='stamp'||t==='note'){
+    const hit = t==='note'? noteAt(sp) : pageAnn().slice().reverse().find(a=>a.t===t && itemHit(a,w,(coarse()?10:4)/S.zoom));
+    if (hit) S.itemDrag={a:hit, start:w, orig:JSON.parse(JSON.stringify(hit)), pushed:false};
+  }
 }
 function armHold(){ clearTimeout(holdTimer); holdTimer=setTimeout(onHold, 520); }
 function onHold(){
@@ -2693,6 +2697,8 @@ function noteMove(e, sp){
     else { const k=Math.max(0.05, Math.hypot(w.x-D.anchor.x,w.y-D.anchor.y)/D.d0); restoreSel(D.orig); for (const a of selItems()) scaleItem(a,D.anchor.x,D.anchor.y,k); }
     drawAnn(); drawOv(); return; }
   if (S.tapeDrag){ S.tapeDrag.cur=w; drawOv(); return; }
+  if (S.itemDrag && A.moved){ const D=S.itemDrag; if (!D.pushed){ pushUndo(); D.pushed=true; }
+    const dx=w.x-D.start.x, dy=w.y-D.start.y; Object.assign(D.a, JSON.parse(JSON.stringify(D.orig))); moveItem(D.a,dx,dy); drawAnn(); drawOv(); return; }
 }
 function noteUp(e, sp){
   const A=S.noteAct; if (!A || A.id!==e.pointerId) return; S.noteAct=null; clearTimeout(holdTimer);
@@ -2716,12 +2722,13 @@ function noteUp(e, sp){
     if (!A.moved){ const hit=pageAnn().slice().reverse().find(a=>a.t==='tape'&&itemHit(a,w,4/S.zoom)); if (hit) toggleTape(hit); drawOv(); return; }
     const x0=Math.min(D.start.x,D.cur.x), y0=Math.min(D.start.y,D.cur.y), ww=Math.abs(D.cur.x-D.start.x), hh=Math.abs(D.cur.y-D.start.y);
     if (ww*S.zoom>6 && hh*S.zoom>6){ pushUndo(); pageAnn().push({id:S.idSeq++, t:'tape', x:x0,y:y0,w:ww,h:hh, c:'#f4a7b9', open:false}); saveAnn(); drawAnn(); } drawOv(); return; }
+  if (S.itemDrag){ const D=S.itemDrag; S.itemDrag=null; if (A.moved && D.pushed){ saveAnn(); drawAnn(); drawOv(); return; } }
   if (A.moved) return;
   if (t==='text'){ const hit=pageAnn().slice().reverse().find(a=>a.t==='text'&&itemHit(a,w,4/S.zoom)); if (hit) editText(hit,false); else { const st=S.style.txt; const it={id:S.idSeq++, t:'text', x:w.x, y:w.y-st.size/S.zoom*0.6, text:'', size:st.size/S.zoom, c:st.c, b:!!st.b, u:!!st.u, bg:st.bg||'', ff:st.ff||'g'}; editText(it,true); } return; }
   if (t==='stamp'){ placeStamp(w); return; }
   if (t==='note'){ const hit=noteAt(sp); if (hit) openNote(hit); else { const it={id:S.idSeq++, t:'note', x:w.x, y:w.y, text:'', c:'#ffd84d'}; openNote(it,true); } return; }
 }
-function noteCancel(){ clearTimeout(holdTimer); S.noteAct=null; S.stroke=null; S.lasso=null; S.tapeDrag=null; if (S.lassoDrag){ S.lassoDrag=null; } drawOv(); }
+function noteCancel(){ clearTimeout(holdTimer); if (S.itemDrag){ if (S.itemDrag.pushed) Object.assign(S.itemDrag.a, S.itemDrag.orig); S.itemDrag=null; drawAnn(); } S.noteAct=null; S.stroke=null; S.lasso=null; S.tapeDrag=null; if (S.lassoDrag){ S.lassoDrag=null; } drawOv(); }
 function eraseAt(w){
   const r=S.style.eraserR/S.zoom; const list=pageAnn(); let changed=false; const out=[];
   for (const a of list){
@@ -2905,7 +2912,7 @@ function renderStyleBar(){
       <button class="wbtn ${st.ff==='m'?'':'on'}" data-tf="g" title="ゴシック体">ゴ</button><button class="wbtn ${st.ff==='m'?'on':''}" data-tf="m" title="明朝体" style="font-family:${MINCHO_STACK.replace(/"/g,"'")}">明</button>
       <span class="sep"></span>
       <span class="hintx" style="margin:0 2px">背景</span>${[['','なし'],['#ffffff','白'],['#fff59d','黄'],['#c8e6ff','青'],['#ffd0d0','赤']].map(([v,l])=>`<button class="wbtn tbg ${ (st.bg||'')===v?'on':''}" data-tbg="${v}" title="背景：${l}" style="${v?`background:${v};color:#111`:''}">${l}</button>`).join('')}
-      <span class="hintx">タップで入力／既存の文字をタップで編集（入力中・選択中の文字にも反映）</span>`;
+      <span class="hintx">タップで入力／文字をタップで編集・ドラッグで移動（書式は入力中・選択中の文字にも反映）</span>`;
   } else if (t==='stamp'){ h+=STAMPS.map(s=>`<button class="stb ${S.style.stamp===s.k?'on':''}" data-st="${s.k}" style="color:${s.c}">${s.label}</button>`).join('')+(S.style.sealName?`<button class="tg" id="sealEdit" title="日付印の名前">印:${esc(S.style.sealName)}</button>`:'');
   } else if (t==='lasso'){ h+='<span class="hintx">囲んで選択 → 移動・右下の◯で拡大縮小・色・複製・削除・計測化。テープはタップで開閉</span>';
   } else if (t==='tape'){ h+='<span class="hintx">ドラッグで隠す範囲を作成。タップで表示／非表示（暗記・確認用）</span>';
