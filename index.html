@@ -1948,7 +1948,7 @@ S.wallDef = (()=>{ try{ return JSON.parse(localStorage.getItem('pdfmeasure:walld
 // 高さの入力チェック（m で入れた 2.7 → 2700、桁違いは拒否）
 function normH(v){ v=+v; if (!(v>0)) return 0; if (v<20){ const mm=Math.round(v*1000); toast(`高さを ${mm}mm として入力しました（mで入力された値を換算）`); return mm; }
   if (v<300 || v>20000){ toast('壁の高さは 300〜20,000mm で入力してください'); return 0; } return Math.round(v); }
-function newWallObj(){ const W={sys:baseSysId(S.wallDef.sys||''), h:S.wallDef.h, base:S.wallDef.base||'start', openings:[]}; if (S.wallDef.opt && WVAR[W.sys+'|'+S.wallDef.opt]) W.opt=S.wallDef.opt; return W; }
+function newWallObj(){ const W={sys:baseSysId(S.wallDef.sys||''), h:S.wallDef.h, base:S.wallDef.base||'start', openings:[]}; if (S.wallDef.layMode && S.wallDef.layMode!=='auto') W.layMode=S.wallDef.layMode; if (S.wallDef.opt && WVAR[W.sys+'|'+S.wallDef.opt]) W.opt=S.wallDef.opt; return W; }
 function saveWallDef(){ try{ localStorage.setItem('pdfmeasure:walldef', JSON.stringify(S.wallDef)); }catch(e){} if (typeof updateWallBar==='function') updateWallBar(); }
 
 // ---- PDF全ページから開口記号・建具表サイズを抽出 ----
@@ -2028,8 +2028,12 @@ function optimizeLayer({segs,H,ops,B,W,sideStuds,lower,mustOnStud,pref}){
     const segChoice=[]; let list=[];
     for (const g of segs){
       // 目地候補：下張はスタッド位置、上張は50mm刻み
-      let shifts;
-      if (mustOnStud){ shifts=[...new Set(sideStuds.filter(x=>x>=g.a-1&&x<=g.b+1).map(x=>Math.round(((x-g.a)%period+period)%period)))]; if (!shifts.length) shifts=[0]; }
+      let shifts; const along0 = orient==='v'? bw : bl;
+      const mode=W.layMode||'auto';
+      // 片押し・中央振分け：ボードの目地位置を基準端から決める（上張は下張と重ならないよう半枚ずらしも候補）
+      const forced = mode==='start'? 0 : mode==='end'? ((g.b-g.a)%along0) : mode==='center'? (((g.b-g.a)/2)%along0) : null;
+      if (forced!=null){ shifts=[Math.round(forced)]; if (!mustOnStud){ shifts.push(Math.round((forced+along0/2)%along0)); } }
+      else if (mustOnStud){ shifts=[...new Set(sideStuds.filter(x=>x>=g.a-1&&x<=g.b+1).map(x=>Math.round(((x-g.a)%period+period)%period)))]; if (!shifts.length) shifts=[0]; }
       else { shifts=[]; for (let s=0; s<period; s+=50) shifts.push(s); }
       let segBest=null;
       for (const shift of shifts) for (const fromTop of [false,true]) for (const stagger of (orient==='h'? [0, mustOnStud? nearestStudStagger(bl, sideStuds, g) : Math.round(bl/2/50)*50] : [0])){
@@ -2042,17 +2046,23 @@ function optimizeLayer({segs,H,ops,B,W,sideStuds,lower,mustOnStud,pref}){
         if (lower){ const lw=lower.list.filter(p=>p.x>=g.a-1&&p.x+p.w<=g.b+1);
           if (tooClose(jointsX(L,[g]), jointsX(lw,[g]))) pen+=1e9;     // 上張と下張の縦目地は100mm以上ずらす
           if (tooClose(jointsY(L,H), jointsY(lw,H))) pen+=1e8; }        // 横目地も重ねない
+        // 開口キワ：開口の縦の縁・上下の縁から clr 以内に目地を作らない（角からのひび割れ防止。L型に切り欠く）
+        let edge=0; if (W.opEdge!==false && ops.length){ const clr=+W.opClr||100;
+          const gx=jointsX(L,[g]); for (const o of ops){ if (o.e<g.a||o.s>g.b) continue; const top=(+o.sill||0)+ +o.h, sill=+o.sill||0;
+            for (const x of gx) if (Math.abs(x-o.s)<clr || Math.abs(x-o.e)<clr) edge++;
+            for (const p of L){ if (p.x+p.w<o.s-clr || p.x>o.e+clr) continue; for (const y of [p.y, p.y+p.h]) if (y>1 && y<H-1 && ((top<H-1 && Math.abs(y-top)<clr) || (sill>1 && Math.abs(y-sill)<clr))) { edge++; break; } } } }
+        pen+=edge*3e6;
         const sheets=estimateSheets(L,orient,bw,bl);
         const sc=pen + sheets*bw*bl + L.length*1000;
-        if (!segBest||sc<segBest.sc) segBest={sc,P,L,pen,off};
+        if (!segBest||sc<segBest.sc) segBest={sc,P,L,pen,off,edge};
       }
-      segChoice.push(segBest.P); list=list.concat(segBest.L); list.off=(list.off||0)+segBest.off;
+      segChoice.push(segBest.P); list=list.concat(segBest.L); list.off=(list.off||0)+segBest.off; list.edge=(list.edge||0)+(segBest.edge||0);
       if (segBest.pen>=1e9) list.conflict=true;
     }
     const sheets=estimateSheets(list,orient,bw,bl); const used=list.reduce((a,p)=>a+p.area,0);
     const loss=sheets? 1-used/(sheets*bw*bl) : 0;
     const sc=sheets*bw*bl + list.length*1000 + (list.conflict?1e12:0) + (list.off||0)*1e10;
-    if (!best||sc<best.sc) best={sc,list,orient,bl,bw,sheets,loss,used,P:segChoice,conflict:!!list.conflict,offStud:list.off||0};
+    if (!best||sc<best.sc) best={sc,list,orient,bl,bw,sheets,loss,used,P:segChoice,conflict:!!list.conflict,offStud:list.off||0,edge:list.edge||0};
   }
   return best;
 }
@@ -2157,7 +2167,7 @@ function computeWall0(m){
     }
   }
   const st=sys? studFor(sys,H) : null;
-  return {segs, Ltot, H, ops, opArea, nSmall, area, net, pitch, arr, studs, sway, boards, layers, sys, st};
+  return {segs, Ltot, H, ops, opArea, nSmall, area, net, pitch, arr, studs, sway, boards, layers, sys, st, wallRef:{opClr:W.opClr}};
 }
 function wallSummary(m){
   const c=computeWall(m); const f=v=>(v/1e6).toLocaleString('ja-JP',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -2229,6 +2239,8 @@ function refreshProps(){
    <div class="pg"><label>下張ボード</label><select id="pLowB"><option value="">認定仕様（${esc(BOARDS[sys.low].n)}）</option>${Object.entries(BOARDS).map(([k,b])=>`<option value="${k}">${esc(b.n)}（${b.w}×${b.l}）</option>`).join('')}</select></div>`:''}
    ${sys && sys.arr!=='なし'?`<div class="pg"><label>下張の方向</label><div class="segb" data-ori="orientLow"><button data-v="auto">自動</button><button data-v="v">縦張り</button><button data-v="h">横張り</button></div></div>
    ${sys.layersPerSide>1?`<div class="pg"><label>上張の方向</label><div class="segb" data-ori="orientUp"><button data-v="auto">自動</button><button data-v="v">縦張り</button><button data-v="h">横張り</button></div></div>`:''}
+   <div class="pg"><label>ボード割付</label><select id="pLay"><option value="auto">自動（ロス最小）</option><option value="start">片押し（始点から）</option><option value="end">片押し（終点から）</option><option value="center">中央振分け</option></select></div>
+   ${ops.length?`<div class="pg"><label>開口キワ</label><label class="chk" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pOpEdge" ${W.opEdge!==false?'checked':''}>縁から<input class="inp" id="pOpClr" type="number" min="0" step="10" value="${+W.opClr||100}" style="width:64px">mm以内に目地を作らない</label></div>`:''}
    <div class="pg"><label>定尺候補</label><div class="lens">${[1820,2420,2730,3030].map(l=>`<label><input type="checkbox" data-len="${l}" ${(W.lens&&W.lens.length? W.lens : LEN_DEFAULT).includes(l)?'checked':''}>${l}</label>`).join('')}</div></div>
    ${layoutTable(m)}`:''}
    <h2 style="margin-top:10px"><span>開口（${ops.length}）</span><span style="display:flex;gap:4px"><button class="mini" id="pPick" title="図面上で開口の両端をクリック">図面で指定</button><button class="mini" id="pAuto" title="SD・AWなどの記号を壁の近くから検出">記号から検出</button><button class="mini" id="pAdd">＋</button></span></h2>
@@ -2241,7 +2253,10 @@ function refreshProps(){
   $('#pSys').onchange=e=>{ upd(w=>{ w.sys=e.target.value; w.pitch=''; w.upShift=''; if (w.opt && !WVAR[w.sys+'|'+w.opt]) delete w.opt; }); S.wallDef.sys=e.target.value; saveWallDef(); };
   if ($('#pOpt')) $('#pOpt').onchange=e=>{ upd(w=>{ if (e.target.value) w.opt=e.target.value; else delete w.opt; }); S.wallDef.opt=e.target.value||''; saveWallDef(); };
   if (!m.wall) return;
-  $('#pBase').value=W.base||'start';
+  $('#pBase').value=W.base||'start'; if ($('#pLay')) $('#pLay').value=W.layMode||'auto';
+  if ($('#pLay')) $('#pLay').onchange=e=>{ upd(w=>w.layMode=e.target.value); S.wallDef.layMode=e.target.value; saveWallDef(); };
+  if ($('#pOpEdge')) $('#pOpEdge').onchange=e=>upd(w=>w.opEdge=e.target.checked);
+  if ($('#pOpClr')) $('#pOpClr').onchange=e=>{ const v=Math.max(0,Math.min(600,+e.target.value||0)); upd(w=>w.opClr=v); };
   if (el.querySelector('[data-ori]')){ el.querySelectorAll('[data-ori]').forEach(g=>{ const f=g.dataset.ori; const cur=W[f]||W.orient||'auto';
       g.querySelectorAll('button').forEach(b=>{ b.classList.toggle('on', cur===b.dataset.v); b.onclick=()=>upd(w=>{ w[f]=b.dataset.v; delete w.orient; }); }); });
     el.querySelectorAll('[data-len]').forEach(cb=>cb.onchange=()=>{ const v=[...el.querySelectorAll('[data-len]:checked')].map(x=>+x.dataset.len); if (!v.length){ cb.checked=true; toast('定尺は1つ以上選んでください'); return; } upd(w=>w.lens=v); }); }
@@ -2282,7 +2297,9 @@ function renderRoomProps(el,m){
 function layoutTable(m){
   if (!wallOk(m)) return ''; const c=computeWall(m); if (!c.layers.length) return '';
   return `<table class="lay"><tr><th>材料</th><th>方向</th><th>定尺</th><th>枚数</th><th>ロス</th></tr>${c.layers.map(k=>{ const L=c.boards[k]; return `<tr${L.conflict?' class="bad"':''}><td title="${esc(L.board.n)}">${k.replace(/^A/,'A面').replace(/^B/,'B面')}<small>${esc(L.board.n.replace(/^タイガー/,'').replace(/ボード・?/,''))}</small></td><td>${L.orient==='v'?'縦':'横'}</td><td>${L.bw}×${L.bl}</td><td>${L.sheets}</td><td>${(L.loss*100).toFixed(1)}%${L.offStud?`<small class="warn">スタッド外目地${L.offStud}</small>`:''}</td></tr>`; }).join('')}</table>
-  <div class="pmini">材料ごとに張り方向・定尺・目地位置を比較し、ロス率が最小の割付を採用（下張の縦目地はスタッド上、上張は下張目地から100mm以上ずらす）。${c.layers.some(k=>c.boards[k].orient==='h')?' <span class="warn">横張りは認定・施工仕様書の張り方向条件を確認してください。</span>':''}</div>`;
+  ${(()=>{ const W=m.wall; const e=c.layers.reduce((a,k)=>a+(c.boards[k].edge||0),0); const md={auto:'自動（ロス最小）',start:'片押し（始点から）',end:'片押し（終点から）',center:'中央振分け'}[W.layMode||'auto'];
+     return `<div class="pmini">割付：<b>${md}</b>${c.ops.length? (W.opEdge===false? '　開口キワの考慮：なし' : e? `　<span class="warn">⚠ 開口キワ（${+W.opClr||100}mm以内）の目地が ${e} 箇所残っています：${c.layers.filter(k=>c.boards[k].edge).map(k=>k.replace(/^A/,'A面').replace(/^B/,'B面')+c.boards[k].edge).join('・')}${(()=>{ const lowOnly=c.layers.filter(k=>c.boards[k].edge).every(k=>!k.includes('上')); return lowOnly&&c.layers.some(k=>k.includes('上'))? '（下張の目地はスタッド上に限られるため。仕上げ面の上張は回避済み。気になる場合は開口脇にスタッドを追加して目地位置を調整）' : (W.layMode||'auto')==='auto'? '' : '（片押し・振分けで目地位置が決まるため。「自動」にすると避けられる場合があります）'; })()}</span>` : '　開口キワの目地：なし ✓') : ''}</div>`; })()}
+  <div class="pmini">${(m.wall.layMode||'auto')==='auto'? '材料ごとに張り方向・定尺・目地位置を比較し、ロス率が最小の割付を採用' : '目地位置は割付の基準端から固定し、張り方向・定尺はロス最小を選択'}（下張の縦目地はスタッド上、上張は下張目地から100mm以上ずらす${c.ops.length&&m.wall.opEdge!==false?'、開口の縁の近くには目地を作らずL型に切り欠く':''}）。${c.layers.some(k=>c.boards[k].orient==='h')?' <span class="warn">横張りは認定・施工仕様書の張り方向条件を確認してください。</span>':''}</div>`;
 }
 // ---- 開口 ----
 function defaultsForMark(mark){
@@ -2378,7 +2395,7 @@ function showElevation(m){
   const dlg=$('#dlg'); dlg.classList.add('wide');
   const layerBtns=['下地',...c.layers].map(l=>`<button data-l="${l}" class="${elevState.layer===l?'on':''}">${l==='下地'?'下地（スタッド）':l.replace(/^A/,'A面 ').replace(/^B/,'B面 ')+`（${c.boards[l].orient==='v'?'縦':'横'} ${c.boards[l].bl}／ロス${(c.boards[l].loss*100).toFixed(0)}%）`}</button>`).join('');
   dlg.innerHTML=`<h3>割付図 — ${esc(m.name)} ${c.sys?`／${esc(c.sys.name)}`:''}</h3>
-   <p class="sub">L=${fmtMm(c.Ltot)}　H=${c.H.toLocaleString()}mm　スタッド${c.arr}@${c.pitch}${c.st&&c.st.stud?`（${c.st.stud}）`:''}　割付基準：${({start:'始点から',center:'中央振分け',end:'終点から'})[m.wall.base||'start']}　※A面＝壁の始点→終点を見て左側</p>
+   <p class="sub">L=${fmtMm(c.Ltot)}　H=${c.H.toLocaleString()}mm　スタッド${c.arr}@${c.pitch}${c.st&&c.st.stud?`（${c.st.stud}）`:''}　割付基準：${({start:'始点から',center:'中央振分け',end:'終点から'})[m.wall.base||'start']}　ボード：${({auto:'自動（ロス最小）',start:'片押し（始点から）',end:'片押し（終点から）',center:'中央振分け'})[m.wall.layMode||'auto']}　※A面＝壁の始点→終点を見て左側</p>
    <div class="tabs etabs">${layerBtns}<span style="margin-left:auto;display:flex;gap:4px;align-items:center"><button class="mini" id="eZo">－</button><button class="mini" id="eZi">＋</button></span></div>
    <div id="esvg" class="esvg"></div>
    <div id="eqty"></div>
@@ -2415,6 +2432,9 @@ function elevSVG(c, layer, zoom, o){
   for (const st of c.studs) for (const [y0,y1] of st.parts) s+=`<rect x="${X(st.x)-sw/2}" y="${Y(y1)}" width="${sw}" height="${(y1-y0)*sc}" fill="${studCol(st)}" opacity="${studOpacity}"/>`;
   s+=boardSvg;
   // openings
+  // 開口キワに残った縦目地を赤い破線で示す
+  if (layer!=='下地' && c.boards[layer] && c.boards[layer].edge){ const W=(c.wallRef||{}); const clr=+W.opClr||100; const jx=jointsX(c.boards[layer].list, c.segs);
+    for (const o of c.ops) for (const x of jx) if (Math.abs(x-o.s)<clr || Math.abs(x-o.e)<clr) s+=`<line x1="${X(x)}" y1="${Y(c.H)}" x2="${X(x)}" y2="${Y(0)}" stroke="#d62728" stroke-width="2" stroke-dasharray="6 4"/><text x="${X(x)+3}" y="${Y(c.H)+12}" font-size="10" fill="#d62728">キワ目地</text>`; }
   for (const o of c.ops){ const y0=+o.sill||0, y1=y0+ +o.h; s+=`<rect x="${X(o.s)}" y="${Y(y1)}" width="${(o.e-o.s)*sc}" height="${(y1-y0)*sc}" fill="#fff" stroke="#d62728" stroke-width="1.5"/>`;
     s+=`<line x1="${X(o.s)}" y1="${Y(y1)}" x2="${X(o.e)}" y2="${Y(y0)}" stroke="#d62728" stroke-width=".6"/><line x1="${X(o.e)}" y1="${Y(y1)}" x2="${X(o.s)}" y2="${Y(y0)}" stroke="#d62728" stroke-width=".6"/>`;
     // header / sill members
@@ -3500,6 +3520,7 @@ function openWallBatch(opt={}){
      <span class="wbsep"></span>
      <label>スタッド間隔 <input class="inp" id="wbPitch" type="number" min="0" step="1" list="wbPitchL" placeholder="変更しない"> mm<datalist id="wbPitchL"><option value="0">仕様の標準</option><option value="303"></option><option value="455"></option><option value="606"></option></datalist></label>
      <label>割付基準 <select id="wbBase"><option value="__keep">変更しない</option><option value="start">始点から</option><option value="center">中央振分け</option><option value="end">終点から</option></select></label>
+     <label>ボード割付 <select id="wbLay"><option value="__keep">変更しない</option><option value="auto">自動（ロス最小）</option><option value="start">片押し（始点から）</option><option value="end">片押し（終点から）</option><option value="center">中央振分け</option></select></label>
      <label>下張の方向 <select id="wbOL"><option value="__keep">変更しない</option><option value="auto">自動（ロス最小）</option><option value="v">縦張り</option><option value="h">横張り</option></select></label>
      <label>上張の方向 <select id="wbOU"><option value="__keep">変更しない</option><option value="auto">自動（ロス最小）</option><option value="v">縦張り</option><option value="h">横張り</option></select></label>
      <span class="wbsep"></span>
@@ -3567,10 +3588,10 @@ function openWallBatch(opt={}){
   $('#wbApply').onclick=()=>{
     const ids=[...WB.sel]; if (!ids.length){ toast('表の左のチェックで線分を選んでください'); return; }
     let hv=$('#wbH').value===''? null : +$('#wbH').value; const sv=$('#wbSys').value, ov=$('#wbOpt').value, bv=$('#wbBase').value;
-    let pv=$('#wbPitch').value===''? null : +$('#wbPitch').value; const olv=$('#wbOL').value, ouv=$('#wbOU').value;
+    let pv=$('#wbPitch').value===''? null : +$('#wbPitch').value; const olv=$('#wbOL').value, ouv=$('#wbOU').value, lyv=$('#wbLay').value;
     if (pv!=null && pv>0 && pv<10) pv=Math.round(pv*1000); if (pv!=null && pv!==0 && !(pv>=100 && pv<=1200)){ toast('スタッド間隔は 100〜1200mm（0＝仕様の標準）で入力してください'); return; }
     if (hv!=null && hv!==0){ const nh=normH(hv); if (!nh) return; hv=nh; }
-    if (hv==null && pv==null && sv==='__keep' && ov==='__keep' && bv==='__keep' && olv==='__keep' && ouv==='__keep'){ toast('高さ・仕様などの設定値を入力してください'); return; }
+    if (hv==null && pv==null && sv==='__keep' && ov==='__keep' && bv==='__keep' && olv==='__keep' && ouv==='__keep' && lyv==='__keep'){ toast('高さ・仕様などの設定値を入力してください'); return; }
     pushUndo(); let n=0, skip=0;
     for (const m of lineMeasAll().filter(x=>WB.sel.has(x.id))){
       if (!m.wall){ if (!(hv>0) && (sv==='__keep'||!sv)){ skip++; continue; } m.wall=newWallObj(); if (hv==null) m.wall.h=0; wallRename(m); }
@@ -3581,6 +3602,7 @@ function openWallBatch(opt={}){
       if (bv!=='__keep') m.wall.base=bv;
       if (pv!=null) m.wall.pitch = pv>0? pv : '';
       if (olv!=='__keep'){ m.wall.orientLow=olv; delete m.wall.orient; }
+      if (lyv!=='__keep') m.wall.layMode=lyv;
       if (ouv!=='__keep'){ m.wall.orientUp=ouv; delete m.wall.orient; }
       n++; }
     renumberWallNames();
