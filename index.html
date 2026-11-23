@@ -2239,6 +2239,7 @@ function refreshProps(){
    <div class="pg"><label>下張ボード</label><select id="pLowB"><option value="">認定仕様（${esc(BOARDS[sys.low].n)}）</option>${Object.entries(BOARDS).map(([k,b])=>`<option value="${k}">${esc(b.n)}（${b.w}×${b.l}）</option>`).join('')}</select></div>`:''}
    ${sys && sys.arr!=='なし'?`<div class="pg"><label>下張の方向</label><div class="segb" data-ori="orientLow"><button data-v="auto">自動</button><button data-v="v">縦張り</button><button data-v="h">横張り</button></div></div>
    ${sys.layersPerSide>1?`<div class="pg"><label>上張の方向</label><div class="segb" data-ori="orientUp"><button data-v="auto">自動</button><button data-v="v">縦張り</button><button data-v="h">横張り</button></div></div>`:''}
+   <div class="pg"><label>図面表記</label><label class="chk" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pPlanDet" ${S.planDetail?'checked':''}>平詳表記（拡大時にスタッド・ボード・ピッチ寸法を描く）</label></div>
    <div class="pg"><label>ボード割付</label><select id="pLay"><option value="auto">自動（ロス最小）</option><option value="start">片押し（始点から）</option><option value="end">片押し（終点から）</option><option value="center">中央振分け</option></select></div>
    ${ops.length?`<div class="pg"><label>開口キワ</label><label class="chk" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pOpEdge" ${W.opEdge!==false?'checked':''}>縁から<input class="inp" id="pOpClr" type="number" min="0" step="10" value="${+W.opClr||100}" style="width:64px">mm以内に目地を作らない</label></div>`:''}
    <div class="pg"><label>定尺候補</label><div class="lens">${[1820,2420,2730,3030].map(l=>`<label><input type="checkbox" data-len="${l}" ${(W.lens&&W.lens.length? W.lens : LEN_DEFAULT).includes(l)?'checked':''}>${l}</label>`).join('')}</div></div>
@@ -2255,6 +2256,7 @@ function refreshProps(){
   if (!m.wall) return;
   $('#pBase').value=W.base||'start'; if ($('#pLay')) $('#pLay').value=W.layMode||'auto';
   if ($('#pLay')) $('#pLay').onchange=e=>{ upd(w=>w.layMode=e.target.value); S.wallDef.layMode=e.target.value; saveWallDef(); };
+  if ($('#pPlanDet')) $('#pPlanDet').onchange=e=>{ S.planDetail=e.target.checked; try{ localStorage.setItem('pdfmeasure:plandetail', S.planDetail?'1':'0'); }catch(_){} drawOv(); };
   if ($('#pOpEdge')) $('#pOpEdge').onchange=e=>upd(w=>w.opEdge=e.target.checked);
   if ($('#pOpClr')) $('#pOpClr').onchange=e=>{ const v=Math.max(0,Math.min(600,+e.target.value||0)); upd(w=>w.opClr=v); };
   if (el.querySelector('[data-ori]')){ el.querySelectorAll('[data-ori]').forEach(g=>{ const f=g.dataset.ori; const cur=W[f]||W.orient||'auto';
@@ -2365,27 +2367,98 @@ function handleOpenPick(p){
   if (op.pts.length===2){ S.openPick=null; setHint(); openOpeningDlg(m, op.pts[0], op.pts[1]); }
 }
 // ---- 平面上の壁描画 ----
+// ---- 平面への描画：平面詳細図（平詳）の表記 ----
+S.planDetail = (()=>{ try{ return localStorage.getItem('pdfmeasure:plandetail')!=='0'; }catch(e){ return true; } })();
+function wallLayersT(c, sys, W){ // 片側ごとのボード層の厚み（外側→内側）
+  const out={A:[],B:[]}; if (!sys) return out; const n=sys.layersPerSide||2;
+  for (const sd of (sys.sides===2? ['A','B'] : ['A'])) for (let li=n-1; li>=0; li--){ const isUp= li===n-1 && n>1; const bk= isUp? (W.upBoard||sys.up) : (W.lowBoard||sys.low); const B=BOARDS[bk]; out[sd].push({t:(B&&B.t)||12.5, n:B? B.n : ''}); }
+  return out;
+}
+const boardShort = n => n.replace(/^タイガー/,'').replace(/スーパーハード/,'SH').replace(/ハイパーハード(C)?/,'HH').replace(/ボード・?タイプZ/,'Z').replace(/ボード/,'B').replace(/\s*([\d.]+)mm/,'$1').replace(/ /g,'');
 function drawWallPlan(c, m, col, sel){
-  const k=mmPer(m.page); if (!k) return; const sys=wallSys(m); const t=(sys? sys.t : 100)/k; const P=pathPts(m);
+  const k=mmPer(m.page); if (!k) return; const sys=wallSys(m); const T=(sys? sys.t : 100); const t=T/k; const P=pathPts(m);
+  const ok=wallOk(m); const cw= ok? computeWall(m) : null; const tPx=t*S.zoom;
+  const detail = S.planDetail && ok && sys && tPx>=5;
   c.save();
-  // band
-  for (let i=1;i<P.length;i++){ const a=P[i-1], b=P[i]; const L=d2(a,b); if (!L) continue; const nx=-(b.y-a.y)/L*t/2, ny=(b.x-a.x)/L*t/2;
-    const q=[{x:a.x+nx,y:a.y+ny},{x:b.x+nx,y:b.y+ny},{x:b.x-nx,y:b.y-ny},{x:a.x-nx,y:a.y-ny}].map(w2s);
-    c.beginPath(); q.forEach((p,j)=>j?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y)); c.closePath(); c.fillStyle=col+(sel?'40':'26'); c.fill(); c.strokeStyle=col+'aa'; c.lineWidth=1; c.stroke(); }
-  if (!wallOk(m)){ c.restore(); return; }
-  const cw=computeWall(m);
-  // openings
-  for (const o of cw.ops){ const pa=pointAt(P,o.s/k), pb=pointAt(P,o.e/k); const A=w2s(pa), B=w2s(pb);
-    c.beginPath(); c.moveTo(A.x,A.y); c.lineTo(B.x,B.y); c.strokeStyle='#fff'; c.lineWidth=Math.max(6, t*S.zoom); c.stroke();
-    c.strokeStyle=col; c.lineWidth=2; c.setLineDash([4,3]); c.stroke(); c.setLineDash([]);
-    if (o.mark){ c.font='600 11px '+getComputedStyle(document.body).fontFamily; c.fillStyle=col; c.textAlign='center'; const mx=(A.x+B.x)/2, my=(A.y+B.y)/2; c.lineWidth=3; c.strokeStyle='#fff'; c.strokeText(o.mark,mx,my-10); c.fillText(o.mark,mx,my-10); } }
-  // studs
-  const pitchPx=(cw.pitch/k)*S.zoom;
-  if (pitchPx>=6 && cw.studs.length<4000){
-    const sz=Math.max(2.5, Math.min(8, 45/k*S.zoom));
-    for (const s of cw.studs){ const p=pointAt(P,s.x/k); const nx=-p.uy, ny=p.ux; const off = s.side==='A'? t/4 : s.side==='B'? -t/4 : 0;
-      const q=w2s({x:p.x+nx*off, y:p.y+ny*off}); c.fillStyle = s.kind==='jamb'?'#d62728' : s.kind==='cut'? '#999' : col; c.fillRect(q.x-sz/2,q.y-sz/2,sz,sz); }
+  const segN=(a,b)=>{ const L=d2(a,b)||1; return {ux:(b.x-a.x)/L, uy:(b.y-a.y)/L, nx:(b.y-a.y)/L, ny:-(b.x-a.x)/L}; };   // n = A面側（始点→終点を見て左）
+  const offLine=(a,b,d)=>{ const v=segN(a,b); return [w2s({x:a.x+v.nx*d,y:a.y+v.ny*d}), w2s({x:b.x+v.nx*d,y:b.y+v.ny*d})]; };
+  const line=(p,q,w,st,dash)=>{ c.beginPath(); c.moveTo(p.x,p.y); c.lineTo(q.x,q.y); c.lineWidth=w; c.strokeStyle=st; c.setLineDash(dash||[]); c.stroke(); c.setLineDash([]); };
+  if (!detail){
+    // 簡易表示（縮小時）：壁厚の帯
+    for (let i=1;i<P.length;i++){ const a=P[i-1], b=P[i]; if (!d2(a,b)) continue; const q=[...offLine(a,b,t/2), ...offLine(a,b,-t/2).reverse()];
+      c.beginPath(); q.forEach((p,j)=>j?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y)); c.closePath(); c.fillStyle=col+(sel?'40':'26'); c.fill(); c.strokeStyle=col+'aa'; c.lineWidth=1; c.stroke(); }
+    if (ok){ for (const o of cw.ops){ const A=w2s(pointAt(P,o.s/k)), B=w2s(pointAt(P,o.e/k)); line(A,B,Math.max(6,tPx),'#fff'); line(A,B,2,col,[4,3]); } }
+    c.restore(); return;
   }
+  // ---- 詳細表示 ----
+  const L=wallLayersT(cw, sys, m.wall); const sumA=L.A.reduce((a,x)=>a+x.t,0), sumB=L.B.reduce((a,x)=>a+x.t,0);
+  const core=Math.max(20, T-sumA-sumB); const hA=core/2, hB=-core/2;              // 下地（スタッド・ランナー）の範囲：中心から ±core/2（mm）
+  const mmw = v=>v/k;                                                              // mm → ワールド
+  const studD = parseInt((cw.st&&cw.st.stud)||'65')||65, runD = parseInt((cw.st&&cw.st.runner)||'')||core, flg=45;
+  const segOf = x=>{ let acc=0; for (let i=1;i<P.length;i++){ const Lg=d2(P[i-1],P[i])*k; if (x<acc+Lg || i===P.length-1) return {i, a:P[i-1], b:P[i], s:x-acc}; acc+=Lg; } };
+  const at=(x,d)=>{ const g=segOf(x); const v=segN(g.a,g.b); const u=g.s/k; return w2s({x:g.a.x+v.ux*u+v.nx*mmw(d), y:g.a.y+v.uy*u+v.ny*mmw(d)}); };
+  // 開口部は壁を切る
+  const gaps=cw.ops.map(o=>[o.s,o.e]).sort((a,b)=>a[0]-b[0]);
+  const runs=(()=>{ const r=[]; let s0=0; for (const [a,b] of gaps){ if (a>s0) r.push([s0,a]); s0=Math.max(s0,b); } if (s0<cw.Ltot) r.push([s0,cw.Ltot]); return r; })();
+  const pieces=(x0,x1)=>{ const out=[]; let acc=0; for (let i=1;i<P.length;i++){ const Lg=d2(P[i-1],P[i])*k; const a=Math.max(x0,acc), b=Math.min(x1,acc+Lg); if (b>a+0.1) out.push([a,b]); acc+=Lg; } return out; };
+  const face=(x0,x1,d,w,st,dash)=>{ for (const [a,b] of pieces(x0,x1)) line(at(a+0.01,d), at(b-0.01,d), w, st, dash); };
+  // ボード面（外側の線を太く、層の境目は細線）・下地の範囲を薄く塗る
+  for (const [x0,x1] of runs){
+    for (const [a,b] of pieces(x0,x1)){ const q=[at(a+0.01,T/2-sumA+sumA), at(b-0.01,T/2), at(b-0.01,-T/2), at(a+0.01,-T/2)];
+      c.beginPath(); q.forEach((p,j)=>j?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y)); c.closePath(); c.fillStyle=sel? '#ffffff' : '#ffffffe6'; c.fill(); }
+    let d=hA; face(x0,x1,d,0.8,'#888');                                                  // A面 下地側
+    for (let i=L.A.length-1;i>=0;i--){ d+=L.A[i].t; face(x0,x1,d, i===0? 1.8 : 0.8, i===0? col : '#777'); }
+    d=hB; face(x0,x1,d,0.8,'#888');
+    for (let i=L.B.length-1;i>=0;i--){ d-=L.B[i].t; face(x0,x1,d, i===0? 1.8 : 0.8, i===0? col : '#777'); }
+  }
+  // 開口：端部の小口線と、開口記号
+  for (const o of cw.ops){ for (const x of [o.s,o.e]) line(at(x,T/2), at(x,-T/2), 1.6, col);
+    if (o.mark){ const A=at((o.s+o.e)/2, -T/2-mmw(0)), f=11; c.font=`600 ${f}px ${FONT_STACK}`; c.textAlign='center'; c.textBaseline='middle'; c.lineWidth=3; c.strokeStyle='#fff'; c.strokeText(o.mark,A.x,A.y+12); c.fillStyle=col; c.fillText(o.mark,A.x,A.y+12); } }
+  // スタッド（C形鋼の断面）：千鳥はA面側・B面側のボードに沿わせる
+  const pitchPx=(cw.pitch/k)*S.zoom;
+  if (pitchPx>=5 && cw.studs.length<4000){
+    for (const s of cw.studs){ if (s.kind==='cut' && gaps.some(([a,b])=>s.x>a&&s.x<b)) continue;
+      let d0, d1; if (s.side==='A'){ d1=hA; d0=hA-studD; } else if (s.side==='B'){ d0=hB; d1=hB+studD; } else { d0=-Math.min(studD,core)/2; d1=Math.min(studD,core)/2; }
+      const x0=Math.max(0,s.x-flg/2), x1=Math.min(cw.Ltot,s.x+flg/2);
+      const p00=at(x0,d0), p01=at(x0,d1), p10=at(x1,d0), p11=at(x1,d1);
+      const stc = s.kind==='jamb'? '#d62728' : s.kind==='corner'||s.kind==='end'? '#333' : col;
+      c.beginPath(); c.moveTo(p10.x,p10.y); c.lineTo(p00.x,p00.y); c.lineTo(p01.x,p01.y); c.lineTo(p11.x,p11.y);   // [ 形
+      c.lineWidth= Math.max(1, Math.min(2.2, 1.6/k*S.zoom)); c.strokeStyle=stc; c.stroke();
+      if (s.kind==='jamb'){ const pm=at(s.x,(d0+d1)/2); c.fillStyle='#d62728'; c.beginPath(); c.arc(pm.x,pm.y,Math.max(1.5,Math.min(3,tPx/10)),0,TAU); c.fill(); }
+    }
+  }
+  // ---- 寸法（スタッドピッチ）：CAD の連続寸法。同じ間隔は「303×9=2,727」にまとめる ----
+  if (pitchPx>=7){
+    const off=-(T/2) - mmw(0); const gapPx=16, extPx=4; const dOff = -T/2 - (gapPx/S.zoom)*k;   // B面の外側に寸法線
+    const xs=[...new Set(cw.studs.map(s=>Math.round(s.x)))].sort((a,b)=>a-b); if (xs[0]>1) xs.unshift(0); if (xs[xs.length-1]<cw.Ltot-1) xs.push(Math.round(cw.Ltot));
+    const ttl = (x)=>at(x,dOff);
+    // 寸法線・引出線・斜線の目盛り（画面上の向きで描く）
+    const dirs=x=>{ const f=at(x,-T/2), fo=at(x,-T/2-k*0.5/Math.max(S.zoom,1e-6)*S.zoom), g=segOf(x); const v=segN(g.a,g.b);
+      const o=w2s({x:0,y:0}), uu=w2s({x:v.ux,y:v.uy}), nn=w2s({x:-v.nx,y:-v.ny}); const lu=Math.hypot(uu.x-o.x,uu.y-o.y)||1, ln=Math.hypot(nn.x-o.x,nn.y-o.y)||1;
+      return {f, u:{x:(uu.x-o.x)/lu, y:(uu.y-o.y)/lu}, n:{x:(nn.x-o.x)/ln, y:(nn.y-o.y)/ln}}; };
+    { const corners=[]; let acc=0; for (let i=1;i<P.length-1;i++){ acc+=d2(P[i-1],P[i])*k; corners.push(acc); }
+      const pts=[...new Set([0, ...corners, cw.Ltot])].sort((a,b)=>a-b);
+      for (let i=1;i<pts.length;i++) line(ttl(pts[i-1]+0.01), ttl(pts[i]-0.01), 0.8, '#1d4f86'); }
+    for (const x of xs){ const D=dirs(x), q=ttl(x);
+      line({x:D.f.x+D.n.x*3, y:D.f.y+D.n.y*3}, {x:q.x+D.n.x*extPx, y:q.y+D.n.y*extPx}, 0.6, '#1d4f86');           // 引出線
+      const tx=(D.u.x+D.n.x)*0.707*3.5, ty=(D.u.y+D.n.y)*0.707*3.5; line({x:q.x-tx,y:q.y-ty}, {x:q.x+tx,y:q.y+ty}, 1.3, '#1d4f86'); } // 斜線
+    // 数値（同じ間隔はまとめる）
+    const spans=[]; for (let i=1;i<xs.length;i++) spans.push([xs[i-1], xs[i], xs[i]-xs[i-1]]);
+    const groups=[]; for (const sp of spans){ const g=groups[groups.length-1]; if (g && Math.abs(g.v-sp[2])<=1) { g.n++; g.b=sp[1]; } else groups.push({a:sp[0], b:sp[1], v:sp[2], n:1}); }
+    c.font=`500 10.5px ${FONT_STACK}`; c.textAlign='center'; c.textBaseline='middle';
+    for (const g of groups){ const txt = g.n>1? `${g.v}×${g.n}=${(g.v*g.n).toLocaleString('ja-JP')}` : String(g.v); const A=ttl(g.a), B=ttl(g.b); const wpx=Math.hypot(B.x-A.x,B.y-A.y);
+      const tw=c.measureText(txt).width; let show=txt; if (tw+4>wpx){ if (g.n>1 && c.measureText('@'+g.v).width+4<=wpx) show='@'+g.v; else if (c.measureText(String(g.v)).width+2<=wpx) show=String(g.v); else continue; }
+      const mx=(A.x+B.x)/2, my=(A.y+B.y)/2; let ang=Math.atan2(B.y-A.y,B.x-A.x); if (ang>Math.PI/2) ang-=Math.PI; if (ang<-Math.PI/2) ang+=Math.PI;
+      const v=segN(segOf((g.a+g.b)/2).a, segOf((g.a+g.b)/2).b); const o=w2s({x:0,y:0}), on=w2s({x:-v.nx,y:-v.ny}); const ln=Math.hypot(on.x-o.x,on.y-o.y)||1; const ox=(on.x-o.x)/ln*7, oy=(on.y-o.y)/ln*7;
+      c.save(); c.translate(mx+ox,my+oy); c.rotate(ang); c.lineWidth=3; c.strokeStyle='#fff'; c.strokeText(show,0,0); c.fillStyle='#1d4f86'; c.fillText(show,0,0); c.restore(); }
+  }
+  // 仕様の注記（CAD の引出し文字に相当）
+  { const mid=at(cw.Ltot/2, T/2); const v=segN(segOf(cw.Ltot/2).a, segOf(cw.Ltot/2).b); const o=w2s({x:0,y:0}), on=w2s({x:v.nx,y:v.ny}); const ln=Math.hypot(on.x-o.x,on.y-o.y)||1;
+    const bA=L.A.map(x=>boardShort(x.n)).join('+'), bB=L.B.map(x=>boardShort(x.n)).join('+');
+    const txt=`LGS${(cw.st&&cw.st.stud)||''} @${cw.pitch}${cw.arr==='千鳥'?' 千鳥':''}　${bA===bB||!bB? (bA+(sys.sides===2?' 両面':'')) : 'A:'+bA+' / B:'+bB}`;
+    const px=mid.x+(on.x-o.x)/ln*14, py=mid.y+(on.y-o.y)/ln*14; let ang=Math.atan2(v.uy,v.ux); if (ang>Math.PI/2) ang-=Math.PI; if (ang<-Math.PI/2) ang+=Math.PI;
+    c.save(); c.translate(px,py); c.rotate(ang); c.font=`600 11px ${FONT_STACK}`; c.textAlign='center'; c.textBaseline='middle'; const w=c.measureText(txt).width;
+    c.fillStyle='#ffffffe0'; c.fillRect(-w/2-4,-8,w+8,16); c.fillStyle=col; c.fillText(txt,0,0); c.restore(); }
   c.restore();
 }
 // ---- 割付図（立面） ----
