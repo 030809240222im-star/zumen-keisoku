@@ -244,6 +244,9 @@ footer{padding-bottom:max(3px, env(safe-area-inset-bottom)); padding-left:max(10
 #stylebar .sep{width:1px;height:20px;background:var(--line);margin:0 3px}
 .cdot{width:20px;height:20px;border-radius:50%;border:2px solid #ffffff33;cursor:pointer;padding:0}
 .cdot.on{border-color:#fff;box-shadow:0 0 0 2px var(--accent)}
+.tcols{display:inline-flex;flex-wrap:wrap;gap:4px;max-width:300px}
+#stylebar select#tSize{height:28px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px}
+.wbtn.tbg{font-size:11px;padding:0 6px}
 .cpick{width:26px;height:22px;border:1px solid var(--line);border-radius:5px;background:transparent;padding:0;cursor:pointer}
 .wbtn{min-width:30px;height:28px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);color:var(--text);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
 .wbtn i{display:block;border-radius:3px}
@@ -2467,7 +2470,7 @@ const NOTE_TOOLS=['pen','hl','eraser','lasso','text','stamp','note','tape','lase
 const isNoteTool = t => NOTE_TOOLS.includes(t);
 const an=$('#an'), actx=an.getContext('2d');
 S.ann=S.ann||{}; S.bm=S.bm||{}; S.redo=[]; S.mode='measure'; S.selA=new Set(); S.selM=new Set(); S.laser=[];
-const STYLE_DEF={pen:{c:'#1f3fbf',w:2.2}, hl:{c:'#ffe14d',w:16}, txt:{c:'#d62728',size:16}, shape:false, shapeMeasure:false, arrow:false, eraser:'stroke', eraserR:14, scribble:true, stamp:'ok', sealName:''};
+const STYLE_DEF={pen:{c:'#1f3fbf',w:2.2}, hl:{c:'#ffe14d',w:16}, txt:{c:'#d62728',size:16,b:false,u:false,bg:'',ff:'g'}, shape:false, shapeMeasure:false, arrow:false, eraser:'stroke', eraserR:14, scribble:true, stamp:'ok', sealName:''};
 S.style=(()=>{ try{ const j=JSON.parse(localStorage.getItem('pdfmeasure:style')||'{}'); return {...STYLE_DEF, ...j, pen:{...STYLE_DEF.pen,...(j.pen||{})}, hl:{...STYLE_DEF.hl,...(j.hl||{})}, txt:{...STYLE_DEF.txt,...(j.txt||{})}}; }catch(e){ return JSON.parse(JSON.stringify(STYLE_DEF)); } })();
 function saveStyle(){ try{ localStorage.setItem('pdfmeasure:style', JSON.stringify(S.style)); }catch(e){} }
 const pageAnn = (pg=S.page) => (S.ann[pg] ||= []);
@@ -2511,8 +2514,16 @@ function drawShape(c,a){
   c.restore();
 }
 const _mctx=document.createElement('canvas').getContext('2d');
-function textMetrics(a){ _mctx.font=`${a.size}px ${FONT_STACK}`; const lines=(a.text||'').split('\n'); const w=Math.max(a.size*0.6, ...lines.map(l=>_mctx.measureText(l).width)); return {w, h:lines.length*a.size*1.3, lines}; }
-function drawText(c,a){ const t=textMetrics(a); c.save(); c.font=`${a.size}px ${FONT_STACK}`; c.fillStyle=a.c; c.textBaseline='top'; t.lines.forEach((l,i)=>c.fillText(l, a.x, a.y+i*a.size*1.3+a.size*0.1)); c.restore(); }
+const MINCHO_STACK='"Hiragino Mincho ProN","Yu Mincho","YuMincho","MS PMincho","Noto Serif JP",serif';
+const TEXT_COLORS=['#111111','#555555','#ffffff','#d62728','#ff4f7b','#ff7f0e','#f5b800','#8c564b','#2ca02c','#00a86b','#00a8a8','#1f77d4','#1f3fbf','#5b5bd6','#9b30d9','#e83e8c','#7f7f7f','#b5651d','#006400','#000080'];
+const txtFont=(a,px)=>`${a.b?'700':'400'} ${px}px ${a.ff==='m'? MINCHO_STACK : FONT_STACK}`;
+function textMetrics(a){ _mctx.font=txtFont(a,a.size); const lines=(a.text||'').split('\n'); const w=Math.max(a.size*0.6, ...lines.map(l=>_mctx.measureText(l).width)); return {w, h:lines.length*a.size*1.3, lines}; }
+function drawText(c,a){ const t=textMetrics(a); c.save();
+  if (a.bg){ const p=a.size*0.25; c.fillStyle=a.bg; c.globalAlpha=0.9; c.fillRect(a.x-p, a.y-p*0.6, t.w+p*2, t.h+p*1.2); c.globalAlpha=1; }
+  c.font=txtFont(a,a.size); c.fillStyle=a.c; c.textBaseline='top';
+  t.lines.forEach((l,i)=>{ const y=a.y+i*a.size*1.3+a.size*0.1; c.fillText(l, a.x, y);
+    if (a.u && l){ _mctx.font=txtFont(a,a.size); const w=_mctx.measureText(l).width; c.fillRect(a.x, y+a.size*1.05, w, Math.max(a.size*0.07, 0.3)); } });
+  c.restore(); }
 const STAMPS=[
   {k:'ok',label:'確認済',c:'#d62728',box:'rect'},{k:'req',label:'要確認',c:'#ff7f0e',box:'rect'},{k:'hold',label:'保留',c:'#1f77d4',box:'rect'},
   {k:'done',label:'済',c:'#d62728',box:'circle'},{k:'appr',label:'承認',c:'#d62728',box:'circle'},{k:'seal',label:'日付印',c:'#d62728',box:'seal'},
@@ -2706,7 +2717,7 @@ function noteUp(e, sp){
     const x0=Math.min(D.start.x,D.cur.x), y0=Math.min(D.start.y,D.cur.y), ww=Math.abs(D.cur.x-D.start.x), hh=Math.abs(D.cur.y-D.start.y);
     if (ww*S.zoom>6 && hh*S.zoom>6){ pushUndo(); pageAnn().push({id:S.idSeq++, t:'tape', x:x0,y:y0,w:ww,h:hh, c:'#f4a7b9', open:false}); saveAnn(); drawAnn(); } drawOv(); return; }
   if (A.moved) return;
-  if (t==='text'){ const hit=pageAnn().slice().reverse().find(a=>a.t==='text'&&itemHit(a,w,4/S.zoom)); if (hit) editText(hit,false); else { const st=S.style.txt; const it={id:S.idSeq++, t:'text', x:w.x, y:w.y-st.size/S.zoom*0.6, text:'', size:st.size/S.zoom, c:st.c}; editText(it,true); } return; }
+  if (t==='text'){ const hit=pageAnn().slice().reverse().find(a=>a.t==='text'&&itemHit(a,w,4/S.zoom)); if (hit) editText(hit,false); else { const st=S.style.txt; const it={id:S.idSeq++, t:'text', x:w.x, y:w.y-st.size/S.zoom*0.6, text:'', size:st.size/S.zoom, c:st.c, b:!!st.b, u:!!st.u, bg:st.bg||'', ff:st.ff||'g'}; editText(it,true); } return; }
   if (t==='stamp'){ placeStamp(w); return; }
   if (t==='note'){ const hit=noteAt(sp); if (hit) openNote(hit); else { const it={id:S.idSeq++, t:'note', x:w.x, y:w.y, text:'', c:'#ffd84d'}; openNote(it,true); } return; }
 }
@@ -2779,16 +2790,29 @@ function updateSelbar(){
 // ---------- テキスト ----------
 function editText(it, isNew){
   const ed=$('#txted'); S.editing={it,isNew};
-  const p=w2s({x:it.x,y:it.y}); ed.style.left=p.x+'px'; ed.style.top=p.y+'px'; ed.style.fontSize=(it.size*S.zoom)+'px'; ed.style.color=it.c; ed.textContent=it.text; ed.style.display='block';
+  const p=w2s({x:it.x,y:it.y}); ed.style.left=p.x+'px'; ed.style.top=p.y+'px'; ed.style.fontSize=(it.size*S.zoom)+'px'; ed.style.color=it.c; styleEditor(it); ed.textContent=it.text; ed.style.display='block';
   setTimeout(()=>{ ed.focus(); const r=document.createRange(); r.selectNodeContents(ed); r.collapse(false); const s=getSelection(); s.removeAllRanges(); s.addRange(r); },10);
   S._editHide=it.id; drawAnnExcept(it.id);
+}
+function styleEditor(it){ const ed=$('#txted'); ed.style.fontWeight=it.b?'700':'400'; ed.style.fontFamily=it.ff==='m'? MINCHO_STACK : FONT_STACK; ed.style.textDecoration=it.u?'underline':'none'; ed.style.background=it.bg? it.bg : ''; ed.style.color=it.c; ed.style.fontSize=(it.size*S.zoom)+'px'; }
+// 文字の書式を変える：入力中の文字（または投げ縄で選んだ文字）にもすぐ反映
+function applyTextStyle(fn){
+  const st=S.style.txt; fn(st); saveStyle();
+  const targets=[]; if (S.editing && S.editing.it.t==='text') targets.push(S.editing.it);
+  if (S.selA && S.selA.size) for (const a of pageAnn()) if (S.selA.has(a.id) && a.t==='text' && !targets.includes(a)) targets.push(a);
+  // 大きさ・色の欄を触ると入力が確定されるため、直前に入力した文字にも反映する
+  if (!targets.length && S._lastText && Date.now()-S._lastText.t<15000){ const a=pageAnn().find(x=>x.id===S._lastText.id); if (a) targets.push(a); }
+  if (targets.length){ const committed=targets.filter(a=>!(S.editing && S.editing.isNew && S.editing.it===a)); if (committed.length) pushUndo();
+    for (const a of targets){ const sz=a.size*S.zoom; fn(a, true); if (a._sizeSet){ a.size=a._sizeSet/S.zoom; delete a._sizeSet; } }
+    if (committed.length) saveAnn(); if (S.editing) styleEditor(S.editing.it); if (S.editing) drawAnnExcept(S.editing.it.id); else drawAnn(); }
+  renderStyleBar();
 }
 function drawAnnExcept(id){ const c=actx, d=S.dpr; c.setTransform(1,0,0,1,0,0); c.clearRect(0,0,an.width,an.height); const M=viewMatrix(); c.setTransform(M[0]*d,M[1]*d,M[2]*d,M[3]*d,M[4]*d,M[5]*d); for (const a of pageAnn()) if (a.id!==id && a.t!=='note') drawItem(c,a); }
 function commitText(){
   const E=S.editing; if (!E) return; S.editing=null; S._editHide=null; const ed=$('#txted'); const text=ed.innerText.replace(/\n$/,''); ed.style.display='none';
   const it=E.it;
   if (!text.trim()){ if (!E.isNew){ pushUndo(); S.ann[S.page]=pageAnn().filter(a=>a.id!==it.id); saveAnn(); } drawAnn(); return; }
-  pushUndo(); it.text=text; if (E.isNew) pageAnn().push(it); saveAnn(); drawAnn();
+  pushUndo(); it.text=text; if (E.isNew) pageAnn().push(it); saveAnn(); drawAnn(); S._lastText={id:it.id, t:Date.now()};
 }
 // ---------- スタンプ ----------
 function stampDate(){ const d=new Date(); return `${String(d.getFullYear()).slice(2)}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`; }
@@ -2872,7 +2896,16 @@ function renderStyleBar(){
     h+='<span class="sep"></span>'+ws.map(w=>`<button class="wbtn ${Math.abs(st.w-w)<0.01?'on':''}" data-w="${w}" title="太さ ${w}"><i style="width:${Math.min(22,w+2)}px;height:${Math.min(18,Math.max(2,w))}px;background:${t==='hl'?st.c:'currentColor'}"></i></button>`).join('');
     if (t==='pen') h+=`<span class="sep"></span><button class="tg ${S.style.shape?'on':''}" data-tg="shape" title="描いた線を図形に自動補正（長押しでも補正）">◇ 図形</button><button class="tg ${S.style.shapeMeasure?'on':''}" data-tg="shapeMeasure" title="図形を計測に変換（四角→面積、線→距離、円→半径）">📐 図形を計測</button><button class="tg ${S.style.arrow?'on':''}" data-tg="arrow" title="直線に矢印">→</button><button class="tg ${S.style.scribble?'on':''}" data-tg="scribble" title="なぐり書きで消去">〰 消去</button>`;
   } else if (t==='eraser'){ h+=`<button class="tg ${S.style.eraser==='stroke'?'on':''}" data-er="stroke">線ごと</button><button class="tg ${S.style.eraser==='part'?'on':''}" data-er="part">部分</button><span class="sep"></span>`+[8,14,26].map(r=>`<button class="wbtn ${S.style.eraserR===r?'on':''}" data-r="${r}"><i style="width:${r/1.6}px;height:${r/1.6}px;border-radius:50%;background:currentColor"></i></button>`).join('')+'<span class="hintx">計測は消えません</span>';
-  } else if (t==='text'){ const st=S.style.txt; h+=PEN_COLORS.map(c=>`<button class="cdot ${st.c===c?'on':''}" data-c="${c}" style="background:${c}"></button>`).join('')+'<span class="sep"></span>'+[12,16,24,36].map(s=>`<button class="wbtn ${st.size===s?'on':''}" data-s="${s}" style="font-size:${Math.min(18,s*0.7)}px">A</button>`).join('')+'<span class="hintx">タップで入力／既存の文字をタップで編集</span>';
+  } else if (t==='text'){ const st=S.style.txt;
+    h+=`<span class="tcols">${TEXT_COLORS.map(c=>`<button class="cdot ${st.c===c?'on':''}" data-tc="${c}" style="background:${c}" title="${c}"></button>`).join('')}<input type="color" class="cpick" id="tcPick" value="${/^#[0-9a-f]{6}$/i.test(st.c)?st.c:'#d62728'}" title="好きな色"></span>
+      <span class="sep"></span>
+      <button class="wbtn" data-tsz="-" title="小さく">A−</button><select id="tSize" title="文字の大きさ">${[8,10,12,14,16,18,20,24,28,32,40,48,64,80,96,120].map(v=>`<option value="${v}" ${st.size===v?'selected':''}>${v}</option>`).join('')}${[8,10,12,14,16,18,20,24,28,32,40,48,64,80,96,120].includes(st.size)?'':`<option selected value="${st.size}">${st.size}</option>`}</select><button class="wbtn" data-tsz="+" title="大きく">A＋</button>
+      <span class="sep"></span>
+      <button class="wbtn ${st.b?'on':''}" data-tb="b" title="太字" style="font-weight:800">B</button><button class="wbtn ${st.u?'on':''}" data-tb="u" title="下線" style="text-decoration:underline">U</button>
+      <button class="wbtn ${st.ff==='m'?'':'on'}" data-tf="g" title="ゴシック体">ゴ</button><button class="wbtn ${st.ff==='m'?'on':''}" data-tf="m" title="明朝体" style="font-family:${MINCHO_STACK.replace(/"/g,"'")}">明</button>
+      <span class="sep"></span>
+      <span class="hintx" style="margin:0 2px">背景</span>${[['','なし'],['#ffffff','白'],['#fff59d','黄'],['#c8e6ff','青'],['#ffd0d0','赤']].map(([v,l])=>`<button class="wbtn tbg ${ (st.bg||'')===v?'on':''}" data-tbg="${v}" title="背景：${l}" style="${v?`background:${v};color:#111`:''}">${l}</button>`).join('')}
+      <span class="hintx">タップで入力／既存の文字をタップで編集（入力中・選択中の文字にも反映）</span>`;
   } else if (t==='stamp'){ h+=STAMPS.map(s=>`<button class="stb ${S.style.stamp===s.k?'on':''}" data-st="${s.k}" style="color:${s.c}">${s.label}</button>`).join('')+(S.style.sealName?`<button class="tg" id="sealEdit" title="日付印の名前">印:${esc(S.style.sealName)}</button>`:'');
   } else if (t==='lasso'){ h+='<span class="hintx">囲んで選択 → 移動・右下の◯で拡大縮小・色・複製・削除・計測化。テープはタップで開閉</span>';
   } else if (t==='tape'){ h+='<span class="hintx">ドラッグで隠す範囲を作成。タップで表示／非表示（暗記・確認用）</span>';
@@ -2880,7 +2913,17 @@ function renderStyleBar(){
   } else if (t==='note'){ h+='<span class="hintx">タップで付箋を貼る／付箋をタップで開く</span>'; }
   bar.innerHTML=h; bar.classList.toggle('show', !!h && S.mode==='note');
   const st = (t==='pen'||t==='hl')? S.style[t] : t==='text'? S.style.txt : null;
-  bar.querySelectorAll('.cdot').forEach(b=>b.onclick=()=>{ if (st){ st.c=b.dataset.c; saveStyle(); renderStyleBar(); } });
+  bar.querySelectorAll('.cdot').forEach(b=>b.onclick=()=>{ if (b.dataset.tc){ applyTextStyle(o=>o.c=b.dataset.tc); return; } if (st){ st.c=b.dataset.c; saveStyle(); renderStyleBar(); } });
+  const tp=bar.querySelector('#tcPick'); if (tp){ tp.oninput=()=>{ S.style.txt.c=tp.value; if (S.editing){ S.editing.it.c=tp.value; styleEditor(S.editing.it); } }; tp.onchange=()=>applyTextStyle(o=>o.c=tp.value); }
+  const SZ=[8,10,12,14,16,18,20,24,28,32,40,48,64,80,96,120];
+  const setSz=v=>applyTextStyle((o,isItem)=>{ if (isItem) o._sizeSet=v; else o.size=v; });
+  const ts=bar.querySelector('#tSize'); if (ts){ ts.onchange=()=>setSz(+ts.value); ts.addEventListener('mousedown',e=>e.stopPropagation()); }
+  bar.querySelectorAll('[data-tsz]').forEach(b=>b.onclick=()=>{ const cur=S.style.txt.size; const i=SZ.findIndex(v=>v>=cur); const v= b.dataset.tsz==='+'? (SZ.find(v=>v>cur)||cur) : ([...SZ].reverse().find(v=>v<cur)||cur); setSz(v); });
+  bar.querySelectorAll('[data-tb]').forEach(b=>b.onclick=()=>{ const k=b.dataset.tb; const v=!S.style.txt[k]; applyTextStyle(o=>o[k]=v); });
+  bar.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>applyTextStyle(o=>o.ff=b.dataset.tf));
+  bar.querySelectorAll('[data-tbg]').forEach(b=>b.onclick=()=>applyTextStyle(o=>o.bg=b.dataset.tbg));
+  // ボタン操作で入力中の文字のフォーカスが外れて確定されないように
+  if (t==='text') bar.querySelectorAll('button').forEach(b=>b.addEventListener('pointerdown',e=>e.preventDefault()));
   const cp=bar.querySelector('.cpick'); if (cp) cp.oninput=()=>{ st.c=cp.value; saveStyle(); }; if (cp) cp.onchange=()=>renderStyleBar();
   bar.querySelectorAll('[data-w]').forEach(b=>b.onclick=()=>{ st.w=+b.dataset.w; saveStyle(); renderStyleBar(); });
   bar.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{ st.size=+b.dataset.s; saveStyle(); renderStyleBar(); });

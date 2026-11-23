@@ -2,7 +2,7 @@
 // ・保存するのはアプリ本体と決まったファイルだけ（他の画面や画像をアプリとして保存しない）
 // ・電波が弱いときは 3.5 秒で保存済みのアプリから起動し、裏で最新版を取り込む
 // ・Cloudflare Access のログイン画面（リダイレクト）は保存しない
-const VER='zumen-v4';
+const VER='zumen-v5';
 const SCOPE=new URL('./', self.location).href;
 const CORE=['./','./index.html','./cmaps-ja.json','./manifest.webmanifest','./icon-192.png','./icon-512.png','./apple-touch-icon.png'].map(u=>new URL(u, SCOPE).href);
 const LIBS=['https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
