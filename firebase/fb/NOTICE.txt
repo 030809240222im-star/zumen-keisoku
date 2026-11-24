@@ -1,0 +1,2 @@
+Firebase JS SDK 10.14.1（Apache License 2.0, https://github.com/firebase/firebase-js-sdk）
+npm の公式パッケージ firebase@10.14.1 から取り出し、firebase-app.js の読み込み先だけを同じ場所に書き換えた物。

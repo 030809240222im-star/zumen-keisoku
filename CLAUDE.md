@@ -9,7 +9,7 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - `index.html` … アプリ本体（HTML・CSS・JavaScript をこの1ファイルに収めている）。**ここが正本**。
 - `cmaps-ja.json` … 日本語PDFの文字を読むための CMap（base64）。通常は触らない。
 - `lib/` … pdf.js 3.11.174（`pdf.min.js`・`pdf.worker.min.js`）、pdf-lib 1.17.1、日本語以外の CMap（`cmaps/`）。npm の公式パッケージから取り出し、CDN と同じ中身であることを確かめた物。**外の CDN からは読まない**（Claude 上など lib/ が無いときだけ、改ざん検査 SRI 付きで CDN を使う）。版を変えるときは `index.html` の `LIBS` の `sri` を作り直す（`test/security.mjs` が一致を確かめる）。
-- `sw.js` … オフライン起動用 Service Worker。**index.html を変えたら `VER` の番号を1つ上げる**（例 zumen-v11 → zumen-v12）。
+- `sw.js` … オフライン起動用 Service Worker。**index.html を変えたら `VER` の番号を1つ上げる**（例 zumen-v12 → zumen-v13）。
 - `manifest.webmanifest` / `icon-*.png` / `apple-touch-icon.png` … ホーム画面追加（PWA）用。
 - `admin.html` … 利用者（メールアドレス）の管理の画面。Cloudflare Pages の `/admin`。データは必ず `textContent` で出す（innerHTML に入れない）。
 - `functions/` … Cloudflare Pages Functions。
@@ -33,7 +33,7 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 
 ## 安全の決まり
 - HTML に入れる文字は必ず `esc()` を通す（`'` も直す）。PDF の文字・ファイル名・メモ・付箋はすべて外から来た物として扱う。
-- 公開先の CSP は `connect-src 'self'`（外へ通信できない）。外のサイトへの通信・外のスクリプトを足すと、公開先で止まる。足すときは `functions/_lib/http.js`・`_headers`・試験を一緒に直し、ユーザーに確かめる。
+- 公開先の CSP は `tools/fbbuild.mjs` の `csp()`（通信は自分と、ログイン・名簿のための Google の3か所だけ）。外のサイトへの通信・外のスクリプトを足すと、公開先で止まる。足すときは試験を一緒に直し、ユーザーに確かめる。
 - PDF は `PDF_OPTS`（`isEvalSupported:false`・`enableXfa:false`）で開く。PDF の中の名前（CMap など）を URL に使うときは文字を絞る。
 - トークンなどの秘密の値はリポジトリに書かない（Cloudflare Pages の環境変数に入れる）。
 
@@ -51,6 +51,7 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - 試験（どれも「すべて合格」が出ればよい。部品の jsdom・ws は dxf-takeoff の試験と同じ `%LOCALAPPDATA%\dxf-takeoff`）：
   - `node test/link.mjs`：積算へ書き出した作業データを dxf-takeoff の材料積算（`../../dxf-takeoff/app/material-estimate.html`）で開き、同じ壁の面積が両方で同じかと、天井高＋100・画面の操作を確かめる。壁の計算・書き出し・壁の設定欄を変えたら流す。
   - `node test/security.mjs`：ログインの証明・入口・利用者の管理 API・管理の画面・初期設定の台本（にせの Cloudflare）・アプリの安全の直し。functions/・admin.html・tools/・ライブラリ・ログイン関係を変えたら流す。
+  - `node tools/fbbuild.mjs && node test/firebase.mjs`：Firebase のエミュレータと Chrome で、決まり・登録・名簿・外す・電波なし。firebase/・名簿・ログインを変えたら流す（Java が要る）。
   - `node test/ipad.mjs`：iPad の条件で、線の多い図面を開く・拡大・ページ移動・落ちた後の軽い表示。PDF の読み込み・描画・線の読み取り・縮小画像を変えたら流す。
   - `node test/browser.mjs`：本物の Chrome（headless）で、公開先と同じ CSP の下で PDF を開けるか・外への通信が止まるか・管理の画面が動くか。ライブラリ・CSP・PDF の読み込みを変えたら流す。
 
@@ -59,7 +60,12 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - 壁は開口の所で切って渡す（積算は壁片が開口をまたぐと開口を引かない）。窓の下（腰）は開口の上の面積にまとめる。壁種は `DXF_SPEC` で積算の仕様名（A2000WI など）に対応させる。
 - 壁の `ceil`（天井高）を入れると、ボードは天井高＋100 まで、LGS は高さ H まで（dxf-takeoff の天井までの壁と同じ）。入れていない壁は今までどおり。
 
-## 公開
-- 正式な公開先は **Cloudflare Pages ＋ Cloudflare Access**（管理者が登録したメールアドレスの人だけ）。手順は `docs/公開と利用者の管理.md`。`main` に push すると自動で反映される。
-- GitHub Pages（github.io）は登録なしで誰でも開けてしまうので、Cloudflare の設定が済んだら止める（止めるか・リポジトリを非公開にするかはユーザーが決める）。
+## 公開（Firebase。2026-11-24 から）
+- 正式な公開先は Firebase（プロジェクト zumen-keisoku、<https://zumen-keisoku.web.app> → firebaseapp.com に移る）。**名簿（Firestore の members/<メール>）の人だけ**。公開は `node tools/fbdeploy.mjs`（push では出ない）。確認だけは `--check`。
+- 作り：`firebase/src/index.html`・`shell.js`（ログイン画面。誰でも見える）→ 名簿を確かめ → アプリ本体（`index.html`）を Firestore の `app/current`・`parts` から受け取り、`document.write` で入れ替える。**アプリ本体を hosting に置かない**（`fbbuild.mjs` が紛れ込みを止める）。
+- アプリ側は `window.zumenAuth`（shell.js の `api()`）で 名簿・ログアウト・確かめ直し（`ZA`・`openRoster`）。
+- 決まりは `firebase/firestore.rules.tpl`。持ち主のメールは `firebase/local.json`（git に入れない）から入れる。**リポジトリは公開なので、メール・鍵を書かない**（接続の設定は hosting の `/__/firebase/init.json` から読む）。
+- ログインの部品は `firebase/fb/`（Firebase JS SDK 10.14.1。npm の公式の物、読み込み先だけ書き換え）。
+- `functions/`・`admin.html`・`_headers`・`tools/setup-cloudflare.mjs` は前の案（Cloudflare）の物で、使っていない。
+- GitHub Pages（github.io）は登録なしで誰でも開ける。ユーザーが Firebase 版を確かめたら、止めてリポジトリを非公開にする（ユーザーの決定。合図を待つ）。`main` に push すると GitHub Pages には出る。
 - 計測データは各利用者の端末内（IndexedDB）にだけ保存される。サーバーに送る処理は加えない。

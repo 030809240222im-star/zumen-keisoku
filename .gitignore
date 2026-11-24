@@ -1,0 +1,5 @@
+# このパソコンだけの設定（管理者のメール）・組み立てた物・エミュレータの記録は出さない
+firebase/local.json
+firebase/out/
+.firebase/
+*-debug.log

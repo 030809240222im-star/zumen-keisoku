@@ -497,6 +497,8 @@ header .grp{border-right:1px solid var(--line)} header .grp:last-child{border-ri
   <div class="grp rotgrp">
     <button class="tb" id="bRotL" title="左に90°回転 ([)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a5 5 0 1 1 1.5 4.5"/><path d="M3 3v4h4"/></svg><span class="lbl">左回転</span></button>
     <button class="tb" id="bRotR" title="右に90°回転 (])"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 7a5 5 0 1 0-1.5 4.5"/><path d="M13 3v4H9"/></svg><span class="lbl">右回転</span></button>
+    <button class="tb" id="bRoster" style="display:none" title="名簿 — 使用者を追加・外す（管理者だけ）"><b class="qi">👥</b><span class="lbl">名簿</span></button>
+    <button class="tb" id="bAcct" style="display:none" title="アカウント — ログアウト"><b class="qi">👤</b><span class="lbl">アカウント</span></button>
     <button class="tb" id="bHelp" title="操作方法 (?)"><b class="qi">?</b><span class="lbl">使い方</span></button>
   </div>
   </div>
@@ -4041,16 +4043,20 @@ async function eraseDeviceData(){
   try{ for (const k of await caches.keys()) if (k.startsWith('zumen-')) await caches.delete(k); }catch(e){}
   try{ for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); }catch(e){}
 }
+async function doLogout(erase){
+  if (erase){ S.key=null; clearTimeout(AS.timer); clearTimeout(AS.sessTimer); busy('この端末のデータを消しています…'); await eraseDeviceData(); }   // 消した後に自動保存で書き戻さない
+  const Z=window.zumenAuth; if (Z){ if (erase) try{ await Z.erase(); }catch(e){} else { flushAll(); await Z.signOut(); return; } location.reload(); }
+  else location.href='/cdn-cgi/access/logout';
+}
 function openAccount(email){
   $('#dlg').innerHTML=`<h3>👤 ログイン中</h3><p class="sub">${esc(email)}</p>
    <div class="exl"><button class="exb" id="acOut"><b>ログアウト</b><small>この端末の図面・計測・書き込みは残ります（次にログインした時に続けられます）</small></button>
    <button class="exb" id="acErase"><b class="dng">ログアウトして、この端末のデータを消す</b><small>共用の端末・人に貸す端末で使ったとき。図面・計測・書き込み・履歴を消します（元に戻せません）</small></button></div>
    <div class="acts"><button class="btn pri" id="bCancel">閉じる</button></div>`;
   $('#bCancel').onclick=closeModal;
-  $('#acOut').onclick=()=>{ location.href='/cdn-cgi/access/logout'; };
+  $('#acOut').onclick=()=>doLogout(false);
   $('#acErase').onclick=async()=>{ if (!confirm('この端末に保存した図面・計測・書き込み・履歴をすべて消してログアウトします。元に戻せません。よろしいですか？')) return;
-    S.key=null; clearTimeout(AS.timer); clearTimeout(AS.sessTimer);   // 消した後に自動保存で書き戻さない
-    busy('この端末のデータを消しています…'); await eraseDeviceData(); location.href='/cdn-cgi/access/logout'; };
+    await doLogout(true); };
   $('#modal').classList.add('show');
 }
 function accessLocked(){
@@ -4062,9 +4068,57 @@ function accessLocked(){
     <p style="margin:0 0 14px;color:var(--muted)">ログインの有効期限が切れたか、管理者が利用を止めました。図面・計測のデータはこの端末に残っています。</p>
     <button class="btn pri" id="accessRe" style="width:100%">ログインの画面へ</button></div>`;
   document.body.appendChild(d);
-  $('#accessRe').onclick=()=>{ location.href=new URL('./?fresh='+Date.now(), location.href).href; };   // fresh：Service Worker の保存版を使わない
+  $('#accessRe').onclick=()=>{ if (window.zumenAuth) window.zumenAuth.signOut(); else location.href=new URL('./?fresh='+Date.now(), location.href).href; };   // fresh：Service Worker の保存版を使わない
+}
+// ---- 名簿のログイン（Firebase 版。入口 firebase/src/shell.js が window.zumenAuth を渡す）----
+const ZA=window.zumenAuth||null;
+if (ZA){
+  $('#bAcct').style.display=''; $('#bAcct').onclick=()=>openAccount(ZA.email+(ZA.admin?'（管理者）':'')+(ZA.offline?'　※電波が無いため、前回の確認で開いています':''));
+  if (ZA.admin){ $('#bRoster').style.display=''; $('#bRoster').onclick=()=>openRoster(); }
+  const chk=async()=>{ if (!navigator.onLine || document.visibilityState!=='visible') return; if (await ZA.check()==='out') accessLocked(); };
+  document.addEventListener('visibilitychange', chk); setInterval(chk, 30*60*1000); if (ZA.offline) addEventListener('online', chk);
+}
+function inviteText(){ return `図面計測ツールの使用者に登録しました。
+
+1. 次のアドレスを開きます
+   ${ZA.appUrl}
+2. 登録したメールアドレスの Google アカウントでログインします
+   Google アカウントが無い方は「はじめての方（登録）」でパスワードを決め、届いた確認メールのリンクを押してください
+
+スマホ・タブレットは「ホーム画面に追加」すると、アプリのように使えます。
+図面と計測のデータは、使う端末の中だけに保存され、外には送られません。`; }
+async function openRoster(){
+  const dlg=$('#dlg'); dlg.classList.add('wide'); let L=[];
+  dlg.innerHTML=`<h3>👥 名簿（使用者の追加）</h3><p class="sub">ここに登録したメールアドレスの人だけが、このアプリを使えます。</p>
+   <div class="fld"><span>メール</span><textarea class="inp" id="roEm" rows="3" style="width:100%;height:auto;min-height:66px;font-size:14px;resize:vertical" placeholder="メールアドレス（改行・カンマ区切りで、まとめて入れられます）"></textarea></div>
+   <div class="fld"><span>名前</span><input class="inp" id="roNm" maxlength="60" placeholder="名前・会社名（任意）"></div>
+   <div class="acts" style="justify-content:flex-start"><button class="btn pri" id="roAdd">追加する</button><button class="btn" id="roInv">招待の文面をコピー</button></div>
+   <div class="pmini" id="roMsg" role="status" style="white-space:pre-wrap;min-height:1.4em"></div>
+   <div class="wbtbl" id="roTbl"><div class="empty">読み込んでいます…</div></div>
+   <div class="pmini">外した人は、電波のある所でアプリを開いた時（開いたままなら30分以内）に使えなくなります。電波の無い端末では、最後の確認から30日まで使えることがあります。端末の中の図面データは消えません。</div>
+   <div class="acts"><button class="btn pri" id="bCancel">閉じる</button></div>`;
+  $('#bCancel').onclick=closeModal; $('#modal').classList.add('show');
+  dlg.querySelectorAll('input,textarea').forEach(x=>x.addEventListener('keydown',e=>e.stopPropagation()));
+  const note=(t,bad)=>{ const m=$('#roMsg'); if (m){ m.textContent=t; m.style.color=bad?'#ff9a9a':'#8fe0a0'; } };
+  const load=async()=>{ L=await ZA.list(); draw(); };
+  const draw=()=>{ const t=$('#roTbl'); if (!t) return;
+    t.innerHTML=`<table class="wb"><thead><tr><th>メールアドレス（${L.length}人）</th><th>名前</th><th>役割</th><th>登録日</th><th></th></tr></thead><tbody>${L.map((m,i)=>`<tr data-i="${i}"><td style="word-break:break-all">${esc(m.email)}</td><td><input class="inp" data-nm value="${esc(m.name||'')}" maxlength="60" placeholder="—" style="min-width:110px"></td><td><select data-rl style="-webkit-appearance:none;appearance:none;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px" ${m.email===ZA.email?'disabled':''}><option value="member">使用者</option><option value="admin" ${m.role==='admin'?'selected':''}>管理者</option></select></td><td>${esc(String(m.at||'').slice(0,10))}</td><td>${m.email===ZA.email?'<span class="pmini">自分</span>':'<button class="mini dng" data-rm>外す</button>'}</td></tr>`).join('')}</tbody></table>`;
+    t.querySelectorAll('tr[data-i]').forEach(tr=>{ const m=L[+tr.dataset.i], nm=tr.querySelector('[data-nm]'), rl=tr.querySelector('[data-rl]'), rm=tr.querySelector('[data-rm]');
+      nm.addEventListener('keydown',e=>e.stopPropagation());
+      nm.onchange=async()=>{ try{ await ZA.update(m.email,{name:nm.value}); m.name=nm.value; note('名前を保存しました'); }catch(e){ note(e.message,true); } };
+      rl.onchange=async()=>{ if (rl.value==='admin' && !confirm(m.email+' を管理者にします。名簿の追加・削除ができるようになります。よろしいですか？')){ rl.value=m.role; return; }
+        try{ await ZA.update(m.email,{role:rl.value}); m.role=rl.value; note(m.email+' を'+(rl.value==='admin'?'管理者':'使用者')+'にしました'); }catch(e){ rl.value=m.role; note(e.message,true); } };
+      if (rm) rm.onclick=async()=>{ if (!confirm(m.email+' を名簿から外します。この人は使えなくなります。よろしいですか？')) return; rm.disabled=true; try{ await ZA.remove(m.email); await load(); note(m.email+' を外しました'); }catch(e){ rm.disabled=false; note(e.message,true); } }; }); };
+  $('#roInv').onclick=async()=>{ const t=inviteText(); try{ await navigator.clipboard.writeText(t); note('招待の文面をコピーしました。LINE やメールに貼り付けて送ってください'); }catch(e){ showText('招待の文面', t); } };
+  $('#roAdd').onclick=async()=>{ const es=[...new Set($('#roEm').value.split(/[\s,;、，]+/).map(x=>x.trim().toLowerCase()).filter(Boolean))]; if (!es.length){ note('メールアドレスを入れてください',true); return; } if (es.length>100){ note('一度に追加できるのは100人までです',true); return; }
+    const b=$('#roAdd'); b.disabled=true; const added=[], already=[], bad=[]; note('追加しています…');
+    for (const e of es){ try{ (await ZA.add(e,{name:es.length===1? $('#roNm').value : ''})==='added'? added : already).push(e); }catch(x){ bad.push(e+'（'+x.message+'）'); } }
+    if (added.length){ $('#roEm').value=''; $('#roNm').value=''; } try{ await load(); }catch(x){}
+    b.disabled=false; note([added.length?'追加しました：'+added.join('、'):'', already.length?'登録済み：'+already.join('、'):'', bad.length?'追加できませんでした：'+bad.join('、'):''].filter(Boolean).join('\n'), !added.length && bad.length>0); };
+  try{ await load(); }catch(e){ note(e.message,true); const t=$('#roTbl'); if (t) t.innerHTML='<div class="empty">名簿を読めませんでした</div>'; }
 }
 async function accessCheck(){
+  if (ZA) return;
   if (!STANDALONE || location.protocol!=='https:' || !navigator.onLine) return;
   const id=await accessIdentity(); let seen=false; try{ seen=localStorage.getItem(ACCESS_SEEN)==='1'; }catch(e){}
   if (id && id.email){ try{ localStorage.setItem(ACCESS_SEEN,'1'); }catch(e){}
