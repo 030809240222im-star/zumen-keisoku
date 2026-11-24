@@ -746,36 +746,98 @@ class JaCMapFactory{ constructor(){ } async fetch({name}){ const all=await loadJ
       let r=null; try{ r=await fetch(new URL('lib/cmaps/'+name+'.bcmap', location.href).href); }catch(e){}
       if (!r || !r.ok) r=await fetch(CMAP_CDN+name+'.bcmap');
       if (!r.ok) throw new Error('CMap not available: '+name); return {cMapData:new Uint8Array(await r.arrayBuffer()), compressionType:1}; } const bin=atob(b); const u=new Uint8Array(bin.length); for (let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return {cMapData:u, compressionType:1}; } }
+// ---------- メモリの節約（iPad・iPhone で落ちないように） ----------
+// ・PDF の重い仕事（ページの描画・縮小画像・文字の読み取り）は1つずつ順番に行う（pdfJob）。ページ移動は裏の仕事より先
+// ・スナップ用の線は、ページの描画と同じ命令から同時に取る（getOperatorList でもう1組作らない）
+// ・LOWMEM では、描き終えた命令をその場で捨て、描画が追いつくまで PDF の読み取りを待たせる
+const LOWMEM = (()=>{ const n=navigator; return /iP(hone|ad|od)/.test(n.userAgent||'') || (n.platform==='MacIntel' && n.maxTouchPoints>1) || (n.deviceMemory>0 && n.deviceMemory<=4); })();
+const freeCanvas = c => { if (c && c.tagName==='CANVAS') c.width=c.height=0; };   // Safari は canvas の分をすぐには手放さない
+const PJ={q:[], cur:null, seq:0};
+const jobCancelled = () => { const e=new Error('cancelled'); e.name='RenderingCancelledException'; return e; };
+const isCancel = e => !!e && e.name==='RenderingCancelledException';
+function cancelJob(j){ if (!j) return; j.cancelled=true; if (j.task) try{ j.task.cancel(); }catch(e){} }
+function pdfJob(pri, fn){ return new Promise((res,rej)=>{ PJ.q.push({pri,fn,res,rej,n:PJ.seq++}); if (PJ.cur && (PJ.cur.pri<pri || pri>=10)) cancelJob(PJ.cur); pumpJobs(); }); }
+async function pumpJobs(){
+  if (PJ.cur) return;
+  while (PJ.q.length){ PJ.q.sort((a,b)=>b.pri-a.pri || a.n-b.n); const j=PJ.cur=PJ.q.shift();
+    try{ j.res(await j.fn(j)); }catch(e){ j.rej(e); } finally{ PJ.cur=null; } }
+}
+function dropJobs(){ const q=PJ.q.splice(0); cancelJob(PJ.cur); for (const j of q) j.rej(jobCancelled()); }
+const OP_HEAVY=150000, OP_BACKLOG=20000;   // これより命令の多いページは捨てながら描く／描画待ちの命令の上限
+const hasOpList = page => !!(page._intentStates && [...page._intentStates.values()].some(x=>x.operatorList));
+const PSTREAM={gate:null};
+// 描画が追いつくまで、読み取り側（worker）から次の命令を受け取らない
+function hookStream(doc){
+  const mh=doc && doc._transport && doc._transport.messageHandler; if (!mh || mh._zk || typeof mh.sendWithStream!=='function') return; mh._zk=true;
+  const orig=mh.sendWithStream;
+  mh.sendWithStream=function(name,...rest){ const rs=orig.call(this,name,...rest); const g=PSTREAM.gate; if (name!=='GetOperatorList' || !g) return rs;
+    return {getReader(){ const rd=rs.getReader(); return {read:()=>g.wait().then(()=>rd.read()), cancel:r=>rd.cancel(r), releaseLock:()=>rd.releaseLock(), get closed(){ return rd.closed; }}; }}; };
+}
+async function pdfRender(job, page, o){
+  if (job && job.cancelled) throw jobCancelled();
+  const stream = LOWMEM && !hasOpList(page);
+  const g={rt:null, ol:null, done:false, async wait(){ while (!g.done && g.rt && !g.rt.cancelled && g.ol && g.ol.argsArray.length-(g.rt.operatorListIdx||0)>OP_BACKLOG) await new Promise(r=>setTimeout(r,12)); }};
+  let task; PSTREAM.gate = stream? g : null;
+  try{ task=page.render({canvasContext:o.canvasContext, viewport:o.viewport}); } finally{ PSTREAM.gate=null; }
+  if (job) job.task=task;
+  let st=null; if (page._intentStates) for (const v of page._intentStates.values()) for (const rt of v.renderTasks||[]) if (rt.task===task){ st=v; g.rt=rt; g.ol=v.operatorList; }
+  let h=0, rel=0, told=false;   // h：線を取り終えた位置、rel：捨てた数
+  const step = end => { const ol=g.ol; if (!ol) return;
+    if (o.harvest) for (; h<end; h++) o.harvest.feed(ol.fnArray[h], ol.argsArray[h]);
+    // 描き終えた分を列から取り除き、描く位置をずらす（この描画だけが使っている列なので安全。描いている最中には行わない）
+    if (stream && (told || end>OP_HEAVY) && end>=8192 && g.rt && g.rt.operatorListIdx===end){ ol.fnArray.splice(0,end); ol.argsArray.splice(0,end); g.rt.operatorListIdx=0; rel+=end; h=Math.max(0,h-end); if (!told){ told=true; if (o.onHeavy) o.onHeavy(); } } };
+  // pdf.js はこの合図を描いている最中に出す（位置の更新は後）。描く関数が戻ってから片づけ、続きを頼む
+  if (g.rt) task.onContinue = cont => { Promise.resolve().then(()=>{ if (!g.rt.cancelled) step(g.rt.operatorListIdx||0); cont(); }); };
+  let fin=false;
+  try{ await task.promise; fin=true; step(g.ol? g.ol.argsArray.length : 0); if (o.harvest) o.harvest.ok=!!g.ol; }
+  finally{ g.done=true; if (job) job.task=null;
+    // 捨てた命令・途中でやめた命令を、次の描画で使い回させない
+    if (st && stream && (rel>0 || !fin)){ for (const [k,v] of page._intentStates) if (v===st) page._intentStates.delete(k);
+      if (rel>0) page._zkHeavy=true; if (fin){ g.ol.argsArray.length=0; g.ol.fnArray.length=0; try{ page.cleanup(); }catch(e){} } } }
+}
+// ---- 開いている途中で落ちた図面の印（次に開くときは軽い表示にする） ----
+const GUARD='pdfmeasure:resumeGuard', CRASHED='pdfmeasure:crashed', CRASH_VER=11;
+const lsGet = k => { try{ return JSON.parse(localStorage.getItem(k)||'null'); }catch(e){ return null; } };
+const setGuard = key => { try{ localStorage.setItem(GUARD, JSON.stringify({key, t:Date.now()})); }catch(e){} };
+const clearGuard = () => { try{ localStorage.removeItem(GUARD); }catch(e){} };
+function noteCrash(g){ const c=lsGet(CRASHED)||{}; c[g.key]={t:Date.now(), v:CRASH_VER}; const ks=Object.keys(c).sort((a,b)=>c[b].t-c[a].t).slice(0,20); try{ localStorage.setItem(CRASHED, JSON.stringify(Object.fromEntries(ks.map(k=>[k,c[k]])))); }catch(e){} }
+const crashedBefore = key => { const c=(lsGet(CRASHED)||{})[key]; return !!c && c.v===CRASH_VER && Date.now()-c.t<7*86400e3; };
+let opening=null;   // 開いてから裏の仕事が終わるまでのファイル
+function settled(key){ if (opening===key){ opening=null; clearGuard(); } }
+addEventListener('pagehide', clearGuard);
+document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState==='hidden') clearGuard(); else if (opening) setGuard(opening); });
 // ---------- loading ----------
 async function openFile(f, opts={}){
   if (!f) return;
   // 先に中身を確かめる（開けないファイルで今の図面を閉じてしまわない）
-  let pre;
-  try{ pre = await preloadFile(f); }catch(e){ console.error(e); try{ localStorage.removeItem('pdfmeasure:resumeGuard'); }catch(_){} if (opts.resume) renderRecentCard(); busy(''); toast('開けませんでした：'+fileErrMsg(e)); return; }
+  let pre; const fkey='pdfmeasure:'+f.name+':'+f.size; opening=fkey; setGuard(fkey);
+  try{ pre = await preloadFile(f); }catch(e){ console.error(e); settled(fkey); if (opts.resume) renderRecentCard(); busy(''); toast('開けませんでした：'+fileErrMsg(e)); return; }
   if (S.key){ flushAll(); } AS.resuming=true;
-  S.name=f.name; S.key='pdfmeasure:'+f.name+':'+f.size;
-  S.meas={}; S.scales={}; S.rots={}; S.detect={}; S.schedule={}; S.marks={}; S.texts=null; S.markInfo=null; S.openPick=null; S.undo=[]; S.redo=[]; S.ann={}; S.bm={}; S.updatedAt=0; S.outline=null; S.vtexts={}; S.stexts={}; S.links=[]; S.pdfBytes=null; clearSel(); IMGC.clear(); S.sel=null; S.draft=null; S.geo=null; S.geoPage=0; S.idSeq=1;
+  S.name=f.name; S.key=fkey; S.safe = !!pre.doc && LOWMEM && crashedBefore(fkey);
+  S.meas={}; S.scales={}; S.rots={}; S.detect={}; S.schedule={}; S.marks={}; S.texts=null; S.markInfo=null; S.openPick=null; S.undo=[]; S.redo=[]; S.ann={}; S.bm={}; S.updatedAt=0; S.outline=null; S.vtexts={}; S.stexts={}; S.links=[]; S.pdfFile=null; clearSel(); IMGC.clear(); S.sel=null; S.draft=null; S.geo=null; S.geoPage=0; S.idSeq=1;
   const restored = await loadState();
   // 端末ごとに重ならない番号から採番（PCとiPhoneで同時に追加しても同じIDにならない）
   S.idSeq = Math.max(S.idSeq||1, Math.floor(Date.now()/1000)*1000 + Math.floor(Math.random()*1000));
   $('#drop').style.display='none';
   busy('読み込み中…');
   try{
-    if (pre.doc){ if (S.doc && S.doc!==pre.doc) try{ S.doc.destroy(); }catch(e){} S.pdfBytes=pre.bytes; S.doc=pre.doc; S.isPdf=true; S.img=null; S.nPages=S.doc.numPages; S.encrypted=pre.encrypted; }
-    else { S.img=pre.img; S.doc=null; S.isPdf=false; S.nPages=1; S.encrypted=false; }
+    if (pre.doc){ if (S.doc && S.doc!==pre.doc) { const od=S.doc; S.doc=null; S.pdfPage=null; dropJobs(); if (S.preview!==S.img) freeCanvas(S.preview); S.preview=null; try{ od.destroy(); }catch(e){} } S.pdfFile=f; S.doc=pre.doc; hookStream(S.doc); S.isPdf=true; S.img=null; S.nPages=S.doc.numPages; S.encrypted=pre.encrypted; }
+    else { dropJobs(); if (S.preview!==S.img) freeCanvas(S.preview); S.img=pre.img; S.pdfPage=null; if (S.doc) try{ S.doc.destroy(); }catch(e){} S.doc=null; S.isPdf=false; S.nPages=1; S.encrypted=false; }
     $('#pgn').textContent='/ '+S.nPages; buildThumbs();
     await gotoPage(1, true);
     storeFile(f);
-    const v = await restoreView(); AS.resuming=false; try{ localStorage.removeItem('pdfmeasure:resumeGuard'); }catch(e){} AS.lastSnapHash=''; snapshot('ファイルを開いた時点'); saveSession(); setSaveSt(AS.lastSaved? 'ok' : 'idle');
-    setTimeout(()=>scanOpenings().catch(e=>console.warn('scan',e)), 400);
+    const v = await restoreView(); AS.resuming=false; AS.lastSnapHash=''; snapshot('ファイルを開いた時点'); saveSession(); setSaveSt(AS.lastSaved? 'ok' : 'idle');
+    // 裏の仕事（縮尺・記号）が終わるまでは「開いている途中」。ここで落ちたら次は軽い表示で開く
+    setTimeout(async()=>{ try{ await S.bg; if (S.key===fkey) await scanOpenings(); }catch(e){ console.warn('scan',e); } settled(fkey); }, 400);
     if (CLOUD.on) cloudPull(); refreshBmBtn(); if (S.leftTab==='bm') renderBm();
     busy('');
-    if (opts.resume) toast(`前回の作業を復元しました（${S.page}ページ・計測${Object.values(S.meas).reduce((a,b)=>a+b.length,0)}件・書込${Object.values(S.ann).reduce((a,b)=>a+b.length,0)}件）`);
+    if (S.safe) toast('前回この図面の途中で落ちたため、軽い表示で開きました（スナップ・縮尺と記号の自動検出・縮小画像は切っています）');
+    else if (opts.resume) toast(`前回の作業を復元しました（${S.page}ページ・計測${Object.values(S.meas).reduce((a,b)=>a+b.length,0)}件・書込${Object.values(S.ann).reduce((a,b)=>a+b.length,0)}件）`);
     else if (restored) toast(v? `前回の続きから表示しました（${S.page}ページ）` : '前回の計測データを復元しました');
-  }catch(e){ console.error(e); busy(''); AS.resuming=false; try{ localStorage.removeItem('pdfmeasure:resumeGuard'); }catch(_){} toast('読み込み失敗: '+e.message); $('#drop').style.display=''; }
+  }catch(e){ console.error(e); busy(''); AS.resuming=false; settled(fkey); toast('読み込み失敗: '+e.message); $('#drop').style.display=''; }
 }
 
-const PDF_OPTS={isEvalSupported:false, CMapReaderFactory:JaCMapFactory, cMapUrl:'ja/', cMapPacked:true, useSystemFonts:true, enableXfa:false};
+const PDF_OPTS={isEvalSupported:false, CMapReaderFactory:JaCMapFactory, cMapUrl:'ja/', cMapPacked:true, useSystemFonts:true, enableXfa:false, ...(LOWMEM? {canvasMaxAreaInBytes:4096*4096*4} : {})};
 function fileErrMsg(e){ const n=e&&e.name, m=(e&&e.message)||String(e);
   if (n==='PasswordException') return 'パスワードが違うか、入力が取り消されました';
   if (n==='InvalidPDFException'||/Invalid PDF/i.test(m)) return 'PDFが壊れているか、PDFではありません';
@@ -786,34 +848,35 @@ async function preloadFile(f){
   if (isPdf){
     if (!(await ensurePdfjs())) throw new Error('PDFライブラリを読み込めませんでした（通信環境を確認してください）');
     if (f.size>300*1024*1024) throw new Error('ファイルが大きすぎます（300MBまで）');
-    const buf=await f.arrayBuffer(); const bytes=buf.slice(0);
-    const task=pdfjsLib.getDocument({...PDF_OPTS, data:buf});
+    const task=pdfjsLib.getDocument({...PDF_OPTS, data:await f.arrayBuffer()});   // 中身は worker に渡す（写しを持たない。書き出すときに読み直す）
     let tries=0; task.onPassword=(update, reason)=>{ tries++; if (tries>3){ task.destroy(); return; }
       const pw=prompt((reason===2? 'パスワードが違います。' : 'このPDFはパスワードで保護されています。')+'\nパスワードを入力してください（'+f.name+'）'); if (pw==null){ task.destroy(); return; } update(pw); };
     const doc=await task.promise; let encrypted=false;
     try{ const md=await doc.getMetadata(); encrypted=!!(md && md.info && md.info.EncryptFilterName); }catch(e){}
-    if (!encrypted) encrypted = /\/Encrypt\s/.test(new TextDecoder('latin1').decode(new Uint8Array(bytes, Math.max(0,bytes.byteLength-4096))));
+    if (!encrypted) encrypted = /\/Encrypt\s/.test(new TextDecoder('latin1').decode(await f.slice(Math.max(0,f.size-4096)).arrayBuffer()));
     if (!doc.numPages) throw new Error('ページがありません');
-    return {doc, bytes, encrypted};
+    return {doc, encrypted};
   }
   if (!/^image\//.test(f.type) && !/\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name)) throw new Error('対応していない形式です（PDF・PNG・JPEG）');
   const url=URL.createObjectURL(f); const img=new Image(); img.src=url; await img.decode();
   if (!img.naturalWidth || !img.naturalHeight) throw new Error('画像の大きさを読み取れません');
   return {img};
 }
+// 元の PDF の中身（書き出し用）。端末のファイルが読めなくなっていたら、自動保存の控えから読む
+async function readPdfBytes(){ try{ return await S.pdfFile.arrayBuffer(); }catch(e){ const r=await idbGet('files', S.key); if (r && r.blob) return await r.blob.arrayBuffer(); throw e; } }
 let pageToken=0;
 // ---------- ページ一覧（サムネイル） ----------
-const TH={canvases:{}, queue:[], busy:false, obs:null, token:0};
+const TH={canvases:{}, queue:[], busy:false, obs:null, token:0, heavy:{}};
 function buildThumbs(){
-  const list=$('#thList'); list.innerHTML=''; TH.canvases={}; TH.queue=[]; TH.token++;
+  const list=$('#thList'); list.innerHTML=''; TH.canvases={}; TH.queue=[]; TH.heavy={}; TH.token++;
   $('#thN').textContent = S.nPages? S.nPages+'p' : '';
   if (TH.obs) TH.obs.disconnect();
-  TH.obs = new IntersectionObserver(ents=>{ for (const e of ents) if (e.isIntersecting){ const n=+e.target.dataset.n; if (!TH.canvases[n] && !TH.queue.includes(n)) { TH.queue.push(n); pumpThumbs(); } } }, {root:$('#thumbs'), rootMargin:'300px'});
+  TH.obs = new IntersectionObserver(ents=>{ for (const e of ents) if (e.isIntersecting){ const n=+e.target.dataset.n; if (!TH.canvases[n] && !TH.queue.includes(n)) { TH.queue.push(n); pumpThumbs(); } } }, {root:$('#thumbs'), rootMargin: LOWMEM? '40px' : '300px'});
   for (let n=1;n<=S.nPages;n++){
     const b=document.createElement('button'); b.className='th'; b.dataset.n=n; b.title=n+'ページ';
     b.innerHTML=`<div class="pv"><div class="ph"></div><div class="bd"></div></div><div class="no">${n}</div>`;
     b.onclick=()=>{ gotoPage(n); if (isMobile()) app.classList.remove('thumbs-m'); };
-    list.appendChild(b); TH.obs.observe(b);
+    list.appendChild(b); if (!S.safe) TH.obs.observe(b);
   }
   refreshThumbBadges();
 }
@@ -824,16 +887,21 @@ async function pumpThumbs(){
       // 表示中のページを優先
       TH.queue.sort((a,b)=>Math.abs(a-S.page)-Math.abs(b-S.page));
       const n=TH.queue.shift(); if (TH.canvases[n]) continue;
-      const c=document.createElement('canvas'); const tw=Math.round(260*Math.min(2,window.devicePixelRatio||1)/2*2);
-      if (S.isPdf){ const page=await S.doc.getPage(n); if (tok!==TH.token) return; const v1=page.getViewport({scale:1}); const sc=tw/v1.width; const vp=page.getViewport({scale:sc});
-        c.width=Math.ceil(vp.width); c.height=Math.ceil(vp.height); const cx=c.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,c.width,c.height);
-        await page.render({canvasContext:cx, viewport:vp}).promise; if (n!==S.page) try{ page.cleanup(); }catch(e){} }
+      const c=document.createElement('canvas'); const tw= LOWMEM? 260 : Math.round(260*Math.min(2,window.devicePixelRatio||1)/2*2);
+      if (S.isPdf){
+        try{ await pdfJob(3, async job=>{ if (tok!==TH.token || !S.doc) return;
+          if (n===S.page && S.preview){ c.width=tw; c.height=Math.max(1,Math.round(tw*S.preview.height/S.preview.width)); const cx=c.getContext('2d'); cx.imageSmoothingQuality='high'; cx.drawImage(S.preview,0,0,c.width,c.height); return; }   // 表示中のページは描き直さない
+          const page=await S.doc.getPage(n); const v1=page.getViewport({scale:1}); const vp=page.getViewport({scale:tw/v1.width});
+          c.width=Math.ceil(vp.width); c.height=Math.ceil(vp.height); const cx=c.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,c.width,c.height);
+          try{ await pdfRender(job, page, {canvasContext:cx, viewport:vp, onHeavy:()=>{ TH.heavy[n]=1; cancelJob(job); }}); } finally{ if (n!==S.page) try{ page.cleanup(); }catch(e){} } }); }
+        catch(e){ freeCanvas(c); if (tok!==TH.token) return; if (isCancel(e) && TH.heavy[n]) continue;   // 線の多いページの縮小画像は、そのページを開いたときに作る
+          if (isCancel(e)){ TH.queue.push(n); await new Promise(r=>setTimeout(r,250)); } else console.warn('thumb',n,e); continue; } }
       else if (S.img){ const sc=tw/S.img.naturalWidth; c.width=tw; c.height=Math.round(S.img.naturalHeight*sc); c.getContext('2d').drawImage(S.img,0,0,c.width,c.height); }
       if (tok!==TH.token) return;
       c.dataset.r=-1; TH.canvases[n]=c; applyThumbRot(n);
       await new Promise(r=>setTimeout(r,0));
     }
-  } finally { TH.busy=false; }
+  } finally { TH.busy=false; if (TH.queue.length) setTimeout(pumpThumbs,0); }
 }
 function applyThumbRot(n){ const c=TH.canvases[n]; if (!c) return; const r=S.rots[n]||0; const pv=document.querySelector(`.th[data-n="${n}"] .pv`); if (!pv) return;
   const cur=pv.querySelector('canvas'); if (cur && +cur.dataset.r===r) return;
@@ -858,23 +926,37 @@ async function gotoPage(n, fit){
   S.page=n; $('#pg').value=n; S.draft=null; S.sel=null; S.geo=null; clearSel(); S.links=[]; S.linkHover=null; if (S.editing) commitText(); refreshBmBtn();
   busy('ページ描画中…');
   if (S.isPdf){
-    const page = await S.doc.getPage(n); if (tok!==pageToken) return;
-    S.pdfPage=page;
-    const vp=page.getViewport({scale:1}); S.W=vp.width; S.H=vp.height;
-    // preview bitmap (~3600px long side)
-    const ps = Math.min(4, (isMobile()? 2400 : 3600)/Math.max(S.W,S.H));
-    const c=document.createElement('canvas'); const pv=page.getViewport({scale:ps});
-    c.width=Math.ceil(pv.width); c.height=Math.ceil(pv.height);
-    const cx=c.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,c.width,c.height);
-    await page.render({canvasContext:cx, viewport:pv}).promise; if (tok!==pageToken) return;
-    S.preview=c; S.previewScale=ps; loadLinks(page, vp, n);
+    cancelHi(); const old=S.pdfPage; S.pdfPage=null; if (old) try{ old.cleanup(); }catch(e){}
+    if (LOWMEM && S.preview){ freeCanvas(S.preview); S.preview=null; }
+    let page, vp, hv=null;
+    try{ await pdfJob(10, async job=>{
+      if (tok!==pageToken || !S.doc) throw jobCancelled();
+      page = await S.doc.getPage(n); if (tok!==pageToken) throw jobCancelled();
+      vp=page.getViewport({scale:1}); S.W=vp.width; S.H=vp.height;
+      // preview bitmap
+      const ps = Math.min(4, (S.safe? 2000 : LOWMEM? 3000 : isMobile()? 2400 : 3600)/Math.max(S.W,S.H));
+      const c=document.createElement('canvas'); const pv=page.getViewport({scale:ps});
+      c.width=Math.ceil(pv.width); c.height=Math.ceil(pv.height);
+      const cx=c.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,c.width,c.height);
+      if (!S.safe) hv=new GeoHarvest(vp.transform);
+      try{ await pdfRender(job, page, {canvasContext:cx, viewport:pv, harvest:hv, onHeavy:()=>{ if (tok===pageToken) busy('ページ描画中…（線の多い図面のため時間がかかります）'); }}); }
+      catch(e){ freeCanvas(c); try{ page.cleanup(); }catch(_){} throw e; }
+      if (tok!==pageToken){ freeCanvas(c); try{ page.cleanup(); }catch(_){} throw jobCancelled(); }
+      if (S.preview && S.preview!==S.img) freeCanvas(S.preview);
+      S.pdfPage=page; S.preview=c; S.previewScale=ps;
+      if (TH.heavy[n] && !TH.canvases[n] && !S.safe){ TH.queue.push(n); setTimeout(pumpThumbs,0); }
+    }); }catch(e){ if (isCancel(e) && tok!==pageToken) return; throw e; }
+    if (tok!==pageToken) return;
+    loadLinks(page, vp, n);
     busy('');
     if (fit || !S._fitOnce) fitView(); else { drawBg(); }
     S._fitOnce=true;
-    // vector geometry for snapping
-    extractGeometry(page, vp, n).then(async g=>{ if(tok!==pageToken) return; S.geo=g; S.geoPage=n; setHint();
-      try{ S.detect[n]=await detectScale(page, vp, g); if (tok===pageToken){ applyAutoScale(n); setHint(); } }catch(e){ console.warn('detect',e); }
-    }).catch(e=>console.warn('geometry',e));
+    // vector geometry for snapping（描画と同時に取った線）→ 縮尺の自動判定
+    S.bg = hv? (async()=>{ await new Promise(r=>setTimeout(r,30)); if (tok!==pageToken) return;
+      const g = hv.ok? hv.build() : await extractGeometry(page, vp); hv=null; if (tok!==pageToken) return; S.geo=g; S.geoPage=n; setHint();
+      try{ const d=await pdfJob(6, ()=>tok===pageToken? detectScale(page, vp, g) : null); if (d){ S.detect[n]=d; if (tok===pageToken){ applyAutoScale(n); setHint(); } } }catch(e){ if (!isCancel(e)) console.warn('detect',e); }
+    })().catch(e=>console.warn('geometry',e)) : Promise.resolve();
+    if (!hv) S.geoSkip=1; else S.geoSkip=0;
   } else {
     S.W=S.img.naturalWidth; S.H=S.img.naturalHeight; S.preview=S.img; S.previewScale=1; busy(''); fitView();
   }
@@ -882,74 +964,80 @@ async function gotoPage(n, fit){
 }
 
 // ---------- vector geometry extraction (for object snap) ----------
-async function extractGeometry(page, vp, pg){
-  const ol = await page.getOperatorList();
-  const O = pdfjsLib.OPS, fn=ol.fnArray, ar=ol.argsArray;
-  const T = vp.transform;
-  let ctm=[1,0,0,1,0,0]; const st=[];
-  const segs=[]; const pts=[]; const curves=[]; // pts: x,y,type(1=end,2=center)
-  const mul=(m,n)=>[m[0]*n[0]+m[2]*n[1], m[1]*n[0]+m[3]*n[1], m[0]*n[2]+m[2]*n[3], m[1]*n[2]+m[3]*n[3], m[0]*n[4]+m[2]*n[5]+m[4], m[1]*n[4]+m[3]*n[5]+m[5]];
-  let M = mul(T, ctm);
-  const tx=(x,y)=>[M[0]*x+M[2]*y+M[4], M[1]*x+M[3]*y+M[5]];
-  const MAX=600000;
-  const addCurve=(...q)=>{ if (curves.length>=200000*8) return; for (let k=0;k<8;k+=2){ const p=tx(q[k],q[k+1]); curves.push(p[0],p[1]); } };
-  const addSeg=(x1,y1,x2,y2)=>{ if (segs.length>=MAX*4) return; const a=tx(x1,y1), b=tx(x2,y2); if (Math.abs(a[0]-b[0])+Math.abs(a[1]-b[1]) < 0.05) return; segs.push(a[0],a[1],b[0],b[1]); };
-  for (let i=0;i<fn.length;i++){
-    switch(fn[i]){
-      case O.save: st.push(ctm); break;
-      case O.restore: if(st.length){ ctm=st.pop(); M=mul(T,ctm);} break;
-      case O.transform: ctm=mul(ctm, ar[i]); M=mul(T,ctm); break;
-      case O.paintFormXObjectBegin: st.push(ctm); if (ar[i] && ar[i][0]) { ctm=mul(ctm, ar[i][0]); M=mul(T,ctm);} break;
-      case O.paintFormXObjectEnd: if(st.length){ ctm=st.pop(); M=mul(T,ctm);} break;
-      case O.constructPath: {
-        const ops=ar[i][0], c=ar[i][1]; let j=0, cx=0, cy=0, sx=0, sy=0;
-        let curves=0, bx0=1e9,by0=1e9,bx1=-1e9,by1=-1e9;
-        const bb=(x,y)=>{ if(x<bx0)bx0=x; if(x>bx1)bx1=x; if(y<by0)by0=y; if(y>by1)by1=y; };
-        const flushCircle=()=>{ if (curves>=2 && bx1>bx0){ const w=bx1-bx0,h=by1-by0; if (w>0 && h>0 && Math.max(w,h)/Math.min(w,h)<1.6){ const p=tx((bx0+bx1)/2,(by0+by1)/2); pts.push(p[0],p[1],2);} } curves=0; bx0=by0=1e9; bx1=by1=-1e9; };
-        for (const op of ops){
-          switch(op){
-            case O.moveTo: flushCircle(); cx=c[j++]; cy=c[j++]; sx=cx; sy=cy; bb(cx,cy); break;
-            case O.lineTo: { const x=c[j++], y=c[j++]; addSeg(cx,cy,x,y); cx=x; cy=y; bb(x,y); break; }
-            case O.curveTo: { const x1=c[j++],y1=c[j++],x2=c[j++],y2=c[j++],x=c[j++],y=c[j++]; bb(x1,y1);bb(x2,y2);bb(x,y); const a=tx(cx,cy),b=tx(x,y); pts.push(a[0],a[1],1,b[0],b[1],1); addCurve(cx,cy,x1,y1,x2,y2,x,y); cx=x; cy=y; curves++; break; }
-            case O.curveTo2: { const x2=c[j++],y2=c[j++],x=c[j++],y=c[j++]; bb(x2,y2);bb(x,y); const a=tx(cx,cy),b=tx(x,y); pts.push(a[0],a[1],1,b[0],b[1],1); addCurve(cx,cy,cx,cy,x2,y2,x,y); cx=x; cy=y; curves++; break; }
-            case O.curveTo3: { const x1=c[j++],y1=c[j++],x=c[j++],y=c[j++]; bb(x1,y1);bb(x,y); const a=tx(cx,cy),b=tx(x,y); pts.push(a[0],a[1],1,b[0],b[1],1); addCurve(cx,cy,x1,y1,x,y,x,y); cx=x; cy=y; curves++; break; }
-            case O.closePath: if (cx!==sx||cy!==sy) addSeg(cx,cy,sx,sy); cx=sx; cy=sy; break;
-            case O.rectangle: { flushCircle(); const x=c[j++], y=c[j++], w=c[j++], h=c[j++]; addSeg(x,y,x+w,y); addSeg(x+w,y,x+w,y+h); addSeg(x+w,y+h,x,y+h); addSeg(x,y+h,x,y); cx=sx=x; cy=sy=y; break; }
-          }
-        }
-        flushCircle();
-        break;
-      }
+// 伸びる数値の入れ物（JS の配列より小さい）
+function growBuf(T, cap){ let a=new T(8192), n=0; const need=k=>{ if (n+k<=a.length) return; const b=new T(a.length*2); b.set(a); a=b; };
+  return {get n(){ return n; }, put3(x,y,t){ if (n>=cap) return; need(3); a[n++]=x; a[n++]=y; a[n++]=t; }, put4(p,q,r,t){ if (n>=cap) return; need(4); a[n++]=p; a[n++]=q; a[n++]=r; a[n++]=t; }, put2(x,y){ need(2); a[n++]=x; a[n++]=y; }, done(){ const b=a.slice(0,n); a=new T(0); return b; }}; }
+// 描画の命令から線・点・曲線を取る（feed に命令を順に渡す）
+class GeoHarvest{
+  constructor(T){ this.T=T; this.ctm=[1,0,0,1,0,0]; this.st=[]; this.M=this.mul(T,this.ctm); this.ok=false;
+    this.segs=growBuf(Float32Array,600000*4); this.pts=growBuf(Float32Array,4e6); this.curves=growBuf(Float64Array,200000*8); }
+  mul(m,n){ return [m[0]*n[0]+m[2]*n[1], m[1]*n[0]+m[3]*n[1], m[0]*n[2]+m[2]*n[3], m[1]*n[2]+m[3]*n[3], m[0]*n[4]+m[2]*n[5]+m[4], m[1]*n[4]+m[3]*n[5]+m[5]]; }
+  feed(fn, ar){
+    const O=pdfjsLib.OPS;
+    switch(fn){
+      case O.save: this.st.push(this.ctm); return;
+      case O.restore: case O.paintFormXObjectEnd: if (this.st.length){ this.ctm=this.st.pop(); this.M=this.mul(this.T,this.ctm); } return;
+      case O.transform: if (ar){ this.ctm=this.mul(this.ctm, ar); this.M=this.mul(this.T,this.ctm); } return;
+      case O.paintFormXObjectBegin: this.st.push(this.ctm); if (ar && ar[0]){ this.ctm=this.mul(this.ctm, ar[0]); this.M=this.mul(this.T,this.ctm); } return;
+      case O.constructPath: if (ar) this.path(ar[0], ar[1]); return;
     }
   }
-  return buildIndex(new Float32Array(segs), new Float32Array(pts), new Float64Array(curves));
+  path(ops, c){
+    const O=pdfjsLib.OPS, M=this.M, segs=this.segs, pts=this.pts, cv=this.curves;
+    const X=(x,y)=>M[0]*x+M[2]*y+M[4], Y=(x,y)=>M[1]*x+M[3]*y+M[5];
+    const addSeg=(x1,y1,x2,y2)=>{ const ax=X(x1,y1), ay=Y(x1,y1), bx=X(x2,y2), by=Y(x2,y2); if (Math.abs(ax-bx)+Math.abs(ay-by)<0.05) return; segs.put4(ax,ay,bx,by); };
+    const addCurve=(a,b,d,e,g,h,k,l)=>{ if (cv.n>=200000*8) return; cv.put2(X(a,b),Y(a,b)); cv.put2(X(d,e),Y(d,e)); cv.put2(X(g,h),Y(g,h)); cv.put2(X(k,l),Y(k,l)); };
+    const ends=(x1,y1,x,y)=>{ pts.put3(X(x1,y1),Y(x1,y1),1); pts.put3(X(x,y),Y(x,y),1); };
+    let j=0, cx=0, cy=0, sx=0, sy=0, nc=0, bx0=1e9,by0=1e9,bx1=-1e9,by1=-1e9;
+    const bb=(x,y)=>{ if(x<bx0)bx0=x; if(x>bx1)bx1=x; if(y<by0)by0=y; if(y>by1)by1=y; };
+    const flushCircle=()=>{ if (nc>=2 && bx1>bx0){ const w=bx1-bx0,h=by1-by0; if (w>0 && h>0 && Math.max(w,h)/Math.min(w,h)<1.6) pts.put3(X((bx0+bx1)/2,(by0+by1)/2), Y((bx0+bx1)/2,(by0+by1)/2), 2); } nc=0; bx0=by0=1e9; bx1=by1=-1e9; };
+    for (const op of ops){
+      switch(op){
+        case O.moveTo: flushCircle(); cx=c[j++]; cy=c[j++]; sx=cx; sy=cy; bb(cx,cy); break;
+        case O.lineTo: { const x=c[j++], y=c[j++]; addSeg(cx,cy,x,y); cx=x; cy=y; bb(x,y); break; }
+        case O.curveTo: { const x1=c[j++],y1=c[j++],x2=c[j++],y2=c[j++],x=c[j++],y=c[j++]; bb(x1,y1);bb(x2,y2);bb(x,y); ends(cx,cy,x,y); addCurve(cx,cy,x1,y1,x2,y2,x,y); cx=x; cy=y; nc++; break; }
+        case O.curveTo2: { const x2=c[j++],y2=c[j++],x=c[j++],y=c[j++]; bb(x2,y2);bb(x,y); ends(cx,cy,x,y); addCurve(cx,cy,cx,cy,x2,y2,x,y); cx=x; cy=y; nc++; break; }
+        case O.curveTo3: { const x1=c[j++],y1=c[j++],x=c[j++],y=c[j++]; bb(x1,y1);bb(x,y); ends(cx,cy,x,y); addCurve(cx,cy,x1,y1,x,y,x,y); cx=x; cy=y; nc++; break; }
+        case O.closePath: if (cx!==sx||cy!==sy) addSeg(cx,cy,sx,sy); cx=sx; cy=sy; break;
+        case O.rectangle: { flushCircle(); const x=c[j++], y=c[j++], w=c[j++], h=c[j++]; addSeg(x,y,x+w,y); addSeg(x+w,y,x+w,y+h); addSeg(x+w,y+h,x,y+h); addSeg(x,y+h,x,y); cx=sx=x; cy=sy=y; break; }
+      }
+    }
+    flushCircle();
+  }
+  build(){ return buildIndex(this.segs.done(), this.pts.done(), this.curves.done()); }
+}
+// 予備：描画から取れなかったとき（pdf.js の中の作りが変わったとき）だけ、命令を別に読む
+async function extractGeometry(page, vp){ const ol=await page.getOperatorList(); const h=new GeoHarvest(vp.transform); for (let i=0;i<ol.fnArray.length;i++) h.feed(ol.fnArray[i], ol.argsArray[i]); return h.build(); }
+// 升目ごとの一覧を、数値の列2本で持つ（Map と配列の束より小さい）
+function cellIndex(total, each){
+  const st=new Uint32Array(total+1); each(k=>{ if (k>=0 && k<total) st[k+1]++; }); for (let i=0;i<total;i++) st[i+1]+=st[i];
+  const at=st.slice(0,total), idx=new Uint32Array(st[total]); each((k,v)=>{ if (k>=0 && k<total) idx[at[k]++]=v; });
+  return {get:k=> k>=0 && k<total && st[k+1]>st[k]? idx.subarray(st[k], st[k+1]) : undefined};
 }
 function buildIndex(segs, pts, curves){
   const W=S.W, H=S.H; const N=segs.length/4;
-  const cs = Math.max(W,H)/160; const gx=Math.ceil(W/cs)+2, gy=Math.ceil(H/cs)+2;
+  const cs = Math.max(W,H)/160; const gx=Math.ceil(W/cs)+2, gy=Math.ceil(H/cs)+2, total=gx*gy;
   const cell=(x,y)=>{ let i=Math.floor(x/cs)+1, j=Math.floor(y/cs)+1; i=i<0?0:i>=gx?gx-1:i; j=j<0?0:j>=gy?gy-1:j; return [i,j]; };
-  const grid=new Map();
-  const put=(k,v)=>{ let a=grid.get(k); if(!a) grid.set(k,a=[]); a.push(v); };
   const M=Math.max(W,H)*0.05;
   // ページの外まで延びる線は、ページ範囲に切り詰めてから索引に入れる（極端に長い線で固まらないように）
   const clip=(x1,y1,x2,y2)=>{ let t0=0,t1=1; const dx=x2-x1, dy=y2-y1;
     for (const [p,q] of [[-dx,x1+M],[dx,W+M-x1],[-dy,y1+M],[dy,H+M-y1]]){ if (p===0){ if (q<0) return null; continue; } const r=q/p; if (p<0){ if (r>t1) return null; if (r>t0) t0=r; } else { if (r<t0) return null; if (r<t1) t1=r; } }
     return [x1+dx*t0, y1+dy*t0, x1+dx*t1, y1+dy*t1]; };
-  for (let s=0;s<N;s++){
+  const grid=cellIndex(total, put=>{ for (let s=0;s<N;s++){
     const c0=clip(segs[s*4],segs[s*4+1],segs[s*4+2],segs[s*4+3]); if (!c0 || !c0.every(Number.isFinite)) continue;
     const [x1,y1,x2,y2]=c0;
     const [i0,j0]=cell(Math.min(x1,x2),Math.min(y1,y2)), [i1,j1]=cell(Math.max(x1,x2),Math.max(y1,y2));
     if ((i1-i0+1)*(j1-j0+1) > 600){ // long diagonal: walk along it
-      const n=Math.ceil(Math.hypot(x2-x1,y2-y1)/(cs*0.5)); let last=-1;
-      for (let t=0;t<=n;t++){ const [i,j]=cell(x1+(x2-x1)*t/n, y1+(y2-y1)*t/n); for(let di=-1;di<=1;di++)for(let dj=-1;dj<=1;dj++){ const k=(j+dj)*gx+(i+di); if(k!==last) put(k,s);} last=-1; }
+      const n=Math.ceil(Math.hypot(x2-x1,y2-y1)/(cs*0.5));
+      for (let t=0;t<=n;t++){ const [i,j]=cell(x1+(x2-x1)*t/n, y1+(y2-y1)*t/n); for(let di=-1;di<=1;di++)for(let dj=-1;dj<=1;dj++) put((j+dj)*gx+(i+di), s); }
     } else for (let j=j0;j<=j1;j++) for (let i=i0;i<=i1;i++) put(j*gx+i, s);
-  }
-  const pgrid=new Map(); const P=pts.length/3;
-  for (let p=0;p<P;p++){ const [i,j]=cell(pts[p*3],pts[p*3+1]); const k=j*gx+i; let a=pgrid.get(k); if(!a) pgrid.set(k,a=[]); a.push(p); }
-  const cgrid=new Map(); const NC=curves? curves.length/8 : 0;
-  for (let q=0;q<NC;q++){ let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; for (let k=0;k<8;k+=2){ const x=curves[q*8+k], y=curves[q*8+k+1]; if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+  } });
+  const P=pts.length/3;
+  const pgrid=cellIndex(total, put=>{ for (let p=0;p<P;p++){ const [i,j]=cell(pts[p*3],pts[p*3+1]); put(j*gx+i, p); } });
+  const NC=curves? curves.length/8 : 0;
+  const cgrid=cellIndex(total, put=>{ for (let q=0;q<NC;q++){ let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; for (let k=0;k<8;k+=2){ const x=curves[q*8+k], y=curves[q*8+k+1]; if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
     if (![x0,y0,x1,y1].every(Number.isFinite)) continue; const [i0,j0]=cell(x0,y0), [i1,j1]=cell(x1,y1); if ((i1-i0+1)*(j1-j0+1)>2500) continue;
-    for (let j=j0;j<=j1;j++) for (let i=i0;i<=i1;i++){ const k=j*gx+i; let a=cgrid.get(k); if(!a) cgrid.set(k,a=[]); a.push(q); } }
+    for (let j=j0;j<=j1;j++) for (let i=i0;i<=i1;i++) put(j*gx+i, q); } });
   return {segs, pts, N, P, cs, gx, gy, grid, pgrid, cell, stamp:new Uint32Array(N), stampN:0, curves, NC, cgrid};
 }
 function findSnap(w){
@@ -1094,7 +1182,7 @@ const STD_N=[1,2,2.5,3,4,5,6,8,10,15,20,25,30,40,50,60,75,80,100,120,150,200,250
 const nz = s => s.replace(/[！-～]/g, ch=>String.fromCharCode(ch.charCodeAt(0)-0xFEE0)).replace(/　|\s+/g,'');
 function pagePaper(UU){ const L=Math.max(S.W,S.H)*PT_MM*(UU||1); let best=null; for (const [k,v] of Object.entries(PAPERS)){ const e=Math.abs(v/L-1); if (e<0.04 && (!best||e<best.e)) best={k,e}; } return best&&best.k; }
 async function detectScale(page, vp, geo){
-  const tc = await page.getTextContent();
+  const tc = await page.getTextContent(); S._tc={doc:S.doc, n:page.pageNumber, tc};   // 記号の検出でも使う（線の多いページの文字を2回読まない）
   const T = vp.transform;
   const items = [];
   for (const i of tc.items){
@@ -1202,12 +1290,13 @@ function zoomAt(f, sx, sy){
   S.px = sx-(sx-S.px)*f; S.py = sy-(sy-S.py)*f; S.zoom=nz; viewChanged();
 }
 let viewVer=0, hiTimer=0, hiTask=null;
-function viewChanged(){ if (!Number.isFinite(S.zoom) || S.zoom<=0) S.zoom=1; if (!Number.isFinite(S.px)) S.px=0; if (!Number.isFinite(S.py)) S.py=0; viewVer++; scheduleSession(); drawAnn(); if (S.editing){ const it=S.editing.it, p=w2s({x:it.x,y:it.y}), ed=$('#txted'); ed.style.left=p.x+'px'; ed.style.top=p.y+'px'; ed.style.fontSize=(it.size*S.zoom)+'px'; } $('#rt').textContent=rot()+'°'; drawBg(); drawOv(); $('#sz').textContent=(S.zoom*(S.isPdf?1:1)*100).toFixed(0)+'%'; clearTimeout(hiTimer); hiTimer=setTimeout(renderHi, 160); }
+function cancelHi(){ clearTimeout(hiTimer); if (hiTask){ cancelJob(hiTask); hiTask=null; } if (S.hi){ freeCanvas(S.hi.canvas); S.hi=null; } }
+function viewChanged(){ if (!Number.isFinite(S.zoom) || S.zoom<=0) S.zoom=1; if (!Number.isFinite(S.px)) S.px=0; if (!Number.isFinite(S.py)) S.py=0; viewVer++; scheduleSession(); drawAnn(); if (S.editing){ const it=S.editing.it, p=w2s({x:it.x,y:it.y}), ed=$('#txted'); ed.style.left=p.x+'px'; ed.style.top=p.y+'px'; ed.style.fontSize=(it.size*S.zoom)+'px'; } $('#rt').textContent=rot()+'°'; drawBg(); drawOv(); $('#sz').textContent=(S.zoom*(S.isPdf?1:1)*100).toFixed(0)+'%'; cancelHi(); hiTimer=setTimeout(renderHi, S.pdfPage && S.pdfPage._zkHeavy? 900 : 160); }
 function drawBg(){
   const c=bctx, d=S.dpr; c.setTransform(1,0,0,1,0,0); c.fillStyle='#3a3f48'; c.fillRect(0,0,bg.width,bg.height);
   if (!S.preview) return;
   c.setTransform(d,0,0,d,0,0);
-  c.fillStyle='#000'; c.shadowColor='rgba(0,0,0,.35)'; c.shadowBlur=12; c.fillRect(S.px,S.py,RW()*S.zoom,RH()*S.zoom); c.shadowBlur=0;
+  if (!LOWMEM){ c.fillStyle='#000'; c.shadowColor='rgba(0,0,0,.35)'; c.shadowBlur=12; c.fillRect(S.px,S.py,RW()*S.zoom,RH()*S.zoom); c.shadowBlur=0; }
   const M=viewMatrix(); c.setTransform(M[0]*d,M[1]*d,M[2]*d,M[3]*d,M[4]*d,M[5]*d);
   c.imageSmoothingEnabled = S.zoom*d < S.previewScale*1.5 || !S.isPdf;
   c.imageSmoothingQuality='high';
@@ -1215,21 +1304,22 @@ function drawBg(){
   if (S.hi && S.hi.ver===viewVer) { c.setTransform(1,0,0,1,0,0); c.drawImage(S.hi.canvas,0,0); }
 }
 async function renderHi(){
-  if (!S.isPdf || !S.pdfPage) return;
+  if (!S.isPdf || !S.pdfPage || !S.preview) return;
   const sc=S.zoom*S.dpr; if (sc <= S.previewScale*1.05) return;
-  const ver=viewVer, pg=S.page, r0=rot();
-  if (hiTask){ try{hiTask.cancel();}catch(e){} hiTask=null; }
-  const c=document.createElement('canvas'); c.width=bg.width; c.height=bg.height;
-  const cx=c.getContext('2d');
-  // white page area only
-  cx.fillStyle='#3a3f48'; cx.fillRect(0,0,c.width,c.height);
-  cx.fillStyle='#fff'; cx.fillRect(S.px*S.dpr, S.py*S.dpr, RW()*sc, RH()*sc);
-  const vp=S.pdfPage.getViewport({scale:sc, rotation:(S.pdfPage.rotate+rot())%360, offsetX:S.px*S.dpr, offsetY:S.py*S.dpr});
-  hiTask=S.pdfPage.render({canvasContext:cx, viewport:vp});
-  try{ await hiTask.promise; }catch(e){ return; }
-  hiTask=null;
-  if (ver!==viewVer || pg!==S.page || r0!==rot()) return;
-  S.hi={canvas:c, ver}; drawBg();
+  const ver=viewVer, pg=S.page, r0=rot(), page=S.pdfPage; cancelHi();
+  const stale=()=> ver!==viewVer || pg!==S.page || r0!==rot() || page!==S.pdfPage;
+  try{ await pdfJob(8, async job=>{
+    if (stale()) return; hiTask=job;
+    const c=document.createElement('canvas'); c.width=bg.width; c.height=bg.height;
+    const cx=c.getContext('2d');
+    // white page area only
+    cx.fillStyle='#3a3f48'; cx.fillRect(0,0,c.width,c.height);
+    cx.fillStyle='#fff'; cx.fillRect(S.px*S.dpr, S.py*S.dpr, RW()*sc, RH()*sc);
+    const vp=page.getViewport({scale:sc, rotation:(page.rotate+rot())%360, offsetX:S.px*S.dpr, offsetY:S.py*S.dpr});
+    try{ await pdfRender(job, page, {canvasContext:cx, viewport:vp}); }catch(e){ freeCanvas(c); throw e; } finally{ if (hiTask===job) hiTask=null; }
+    if (stale()){ freeCanvas(c); return; }
+    if (S.hi) freeCanvas(S.hi.canvas); S.hi={canvas:c, ver}; drawBg();
+  }); }catch(e){}
 }
 
 // ---------- overlay drawing ----------
@@ -1975,11 +2065,12 @@ function saveWallDef(){ try{ localStorage.setItem('pdfmeasure:walldef', JSON.str
 // ---- PDF全ページから開口記号・建具表サイズを抽出 ----
 async function scanOpenings(){
   if (!S.isPdf || !S.doc) return;
+  if (S.safe){ S.texts={}; S.markInfo={n:0, kinds:0, sched:0}; refreshProps(); return; }
   const doc=S.doc, marks={}, sched={}, texts={}; const SZ=/^W?[=:]?(\d{3,4})[×xX*＊]H?[=:]?(\d{3,4})$/i;
   for (let n=1;n<=S.nPages;n++){
     if (doc!==S.doc) return;
-    let page, tc; try{ page=await doc.getPage(n); tc=await page.getTextContent(); }catch(e){ continue; }
-    if (n!==S.page) try{ page.cleanup(); }catch(e){}
+    let page, tc; try{ await pdfJob(2, async()=>{ if (doc!==S.doc) return; page=await doc.getPage(n); tc= S._tc && S._tc.doc===doc && S._tc.n===n? S._tc.tc : await page.getTextContent(); if (S._tc && S._tc.n===n) S._tc=null; if (n!==S.page) try{ page.cleanup(); }catch(e){} }); }catch(e){ continue; }
+    if (doc!==S.doc) return; if (!tc) continue;
     if (n%3===0) await new Promise(r=>setTimeout(r,0));   // 画面を固めない
     const vp=page.getViewport({scale:1}), T=vp.transform;
     const its=tc.items.filter(i=>i.str&&i.str.trim()).map(i=>{ const [a,b,c,d,e,f]=i.transform; return {s:nz(i.str).replace(/,/g,''), raw:i.str, x:T[0]*e+T[2]*f+T[4], y:T[1]*e+T[3]*f+T[5], h:Math.hypot(c,d)||8, w:i.width||0, hor:Math.abs(b)<1e-3&&a>0}; });
@@ -3208,7 +3299,7 @@ async function exportPdfRaster(btn, PDFLib){
     for (let n=1;n<=S.nPages;n++){ busy(`PDFを作成中… ${n}/${S.nPages}ページ`);
       const page=await S.doc.getPage(n); const v1=page.getViewport({scale:1}); const sc=Math.min(2.2, 4200/Math.max(v1.width,v1.height)); const vp=page.getViewport({scale:sc});
       const c=document.createElement('canvas'); c.width=Math.ceil(vp.width); c.height=Math.ceil(vp.height); const x=c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height);
-      await page.render({canvasContext:x, viewport:vp}).promise; if (hasContent(n)) x.drawImage(renderOverlayFor(n, v1.width, v1.height, sc), 0, 0, c.width, c.height);
+      await pdfJob(9, ()=>pdfRender(null, page, {canvasContext:x, viewport:vp})); if (n!==S.page) try{ page.cleanup(); }catch(e){} if (hasContent(n)) x.drawImage(renderOverlayFor(n, v1.width, v1.height, sc), 0, 0, c.width, c.height);
       const jpg=await toBlob(c,'image/jpeg',0.9); c.width=c.height=0; const img=await out.embedJpg(await jpg.arrayBuffer());
       const pg=out.addPage([v1.width, v1.height]); pg.drawImage(img,{x:0,y:0,width:v1.width,height:v1.height}); await new Promise(r=>setTimeout(r,0)); }
     const bytes=await out.save(); busy('');
@@ -3217,12 +3308,12 @@ async function exportPdfRaster(btn, PDFLib){
   finally{ btn && (btn.disabled=false); }
 }
 async function exportPdf(btn){
-  if (!S.isPdf || !S.pdfBytes){ return exportPng(); }
+  if (!S.isPdf || !S.pdfFile){ return exportPng(); }
   const pages=[]; for (let n=1;n<=S.nPages;n++) if (hasContent(n)) pages.push(n);
   if (!pages.length){ toast('計測や書き込みのあるページがありません'); return; }
   btn && (btn.disabled=true); busy('PDFを作成中…');
   try{
-    const PDFLib=await loadPdfLib(); const pdf=await PDFLib.PDFDocument.load(S.pdfBytes.slice(0), {ignoreEncryption:true});
+    const PDFLib=await loadPdfLib(); const pdf=await PDFLib.PDFDocument.load(await readPdfBytes(), {ignoreEncryption:true});
     if (S.encrypted || pdf.isEncrypted){ busy(''); btn && (btn.disabled=false); return exportPdfRaster(btn, PDFLib); }
     const pl=pdf.getPages();
     for (const n of pages){ busy(`PDFを作成中… ${n}ページ`);
@@ -3238,7 +3329,7 @@ async function exportPdf(btn){
 async function exportPng(){
   if (!S.W) return; busy('画像を作成中…');
   try{ let base, W=S.W, H=S.H;
-    if (S.isPdf){ const page=S.pdfPage; const sc=Math.min(3, 4000/Math.max(W,H)); const vp=page.getViewport({scale:sc}); base=document.createElement('canvas'); base.width=Math.ceil(vp.width); base.height=Math.ceil(vp.height); const x=base.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,base.width,base.height); await page.render({canvasContext:x, viewport:vp}).promise; const ov=renderOverlayFor(S.page,W,H,sc); x.drawImage(ov,0,0); }
+    if (S.isPdf){ const page=S.pdfPage; const sc=Math.min(3, 4000/Math.max(W,H)); const vp=page.getViewport({scale:sc}); base=document.createElement('canvas'); base.width=Math.ceil(vp.width); base.height=Math.ceil(vp.height); const x=base.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,base.width,base.height); await pdfJob(9, ()=>pdfRender(null, page, {canvasContext:x, viewport:vp})); const ov=renderOverlayFor(S.page,W,H,sc); x.drawImage(ov,0,0); }
     else { base=document.createElement('canvas'); base.width=W; base.height=H; const x=base.getContext('2d'); x.drawImage(S.img,0,0); x.drawImage(renderOverlayFor(S.page,W,H,1),0,0); }
     const out=rotCanvas(base, rot()); busy(''); await saveFile(`${baseName()}_p${S.page}.png`, await toBlob(out));
   }catch(e){ busy(''); toast('画像の作成に失敗しました'); }
@@ -3583,12 +3674,11 @@ async function renderRecentCard(){
 }
 // ---- 起動時：直前の作業を自動で再開 ----
 async function tryResume(){
+  let g=lsGet(GUARD); clearGuard(); if (g && g.key && Date.now()-g.t<10*60e3) noteCrash(g); else g=null;   // 開く途中で落ちていた
   const last=await idbGet('session','last'); if (!last || !last.key){ renderRecentCard(); return; }
   // 前回の自動再開が途中で止まった（ブラウザが落ちた等）ときは、同じファイルを自動では開かない（落ち続けるのを防ぐ）
-  let g=null; try{ g=JSON.parse(localStorage.getItem('pdfmeasure:resumeGuard')||'null'); }catch(e){}
-  if (g && g.key===last.key && Date.now()-g.t<10*60e3){ try{ localStorage.removeItem('pdfmeasure:resumeGuard'); }catch(e){} renderRecentCard();
+  if (g && g.key===last.key){ renderRecentCard();
     toast('前回このファイルを開く途中で止まったため、自動では開きませんでした。「最近のファイル」から開けます'); return; }
-  try{ localStorage.setItem('pdfmeasure:resumeGuard', JSON.stringify({key:last.key, t:Date.now()})); }catch(e){}
   const rec=await idbGet('files', last.key); if (!rec || !rec.blob){ renderRecentCard(); return; }
   busy('前回の作業を復元中…'); await openFile(new File([rec.blob], rec.name, {type:rec.type}), {stored:true, resume:true});
 }
@@ -4189,7 +4279,7 @@ setTool('dist'); resize(); refreshAll();
 $('#hint').textContent='PDFまたは画像を開いてください（ドラッグ＆ドロップ可）';
 tryResume().catch(e=>{ console.warn('resume',e); busy(''); renderRecentCard(); });
 window.__S=S;
-window.__zk={computeWall, wallRow, takeoffWork, wallList, refreshProps, openWallBatch};   // 試験用（test/link.mjs）
+window.__zk={LOWMEM, PJ, GeoHarvest, extractGeometry, pdfJob, readPdfBytes, crashedBefore, gotoPage, zoomAt, computeWall, wallRow, takeoffWork, wallList, refreshProps, openWallBatch};   // 試験用（test/link.mjs）
 })();
 </script>
 </body>

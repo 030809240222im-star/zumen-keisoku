@@ -9,7 +9,7 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - `index.html` … アプリ本体（HTML・CSS・JavaScript をこの1ファイルに収めている）。**ここが正本**。
 - `cmaps-ja.json` … 日本語PDFの文字を読むための CMap（base64）。通常は触らない。
 - `lib/` … pdf.js 3.11.174（`pdf.min.js`・`pdf.worker.min.js`）、pdf-lib 1.17.1、日本語以外の CMap（`cmaps/`）。npm の公式パッケージから取り出し、CDN と同じ中身であることを確かめた物。**外の CDN からは読まない**（Claude 上など lib/ が無いときだけ、改ざん検査 SRI 付きで CDN を使う）。版を変えるときは `index.html` の `LIBS` の `sri` を作り直す（`test/security.mjs` が一致を確かめる）。
-- `sw.js` … オフライン起動用 Service Worker。**index.html を変えたら `VER` の番号を1つ上げる**（例 zumen-v10 → zumen-v11）。
+- `sw.js` … オフライン起動用 Service Worker。**index.html を変えたら `VER` の番号を1つ上げる**（例 zumen-v11 → zumen-v12）。
 - `manifest.webmanifest` / `icon-*.png` / `apple-touch-icon.png` … ホーム画面追加（PWA）用。
 - `admin.html` … 利用者（メールアドレス）の管理の画面。Cloudflare Pages の `/admin`。データは必ず `textContent` で出す（innerHTML に入れない）。
 - `functions/` … Cloudflare Pages Functions。
@@ -37,6 +37,13 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - PDF は `PDF_OPTS`（`isEvalSupported:false`・`enableXfa:false`）で開く。PDF の中の名前（CMap など）を URL に使うときは文字を絞る。
 - トークンなどの秘密の値はリポジトリに書かない（Cloudflare Pages の環境変数に入れる）。
 
+## メモリの決まり（iPad・iPhone で落ちないように。2026-11-24 から）
+- PDF の重い仕事（`page.render`・`getTextContent` など）は、直接呼ばず `pdfJob(優先度, …)` の列に入れて1つずつ行う（ページ 10・書き出し 9・高精細 8・縮尺 6・縮小画像 3・記号 2）。`pdfJob` の中で別の `pdfJob` を待たない（止まる）。
+- 描くときは `pdfRender`。スナップ用の線は描画と同じ命令から取る（`GeoHarvest`）。`getOperatorList()` でもう1組作らない（予備だけ）。
+- `LOWMEM`（iPad・iPhone・メモリ4GB以下）では、命令の多いページ（`OP_HEAVY` 超）は描き終えた命令を捨て（`_zkHeavy`）、読み取りも待たせる（`hookStream`・`OP_BACKLOG`）。pdf.js の中の作り（`_intentStates`・`renderTasks`・`_transport.messageHandler`）を使うので、pdf.js の版を変えたら `test/ipad.mjs` を流す。
+- PDF の中身の写しは持たない（`S.pdfFile`。書き出しは `readPdfBytes()`）。使い終わった canvas は `freeCanvas`。
+- 開く途中で落ちた図面は次に軽い表示（`S.safe`）。印は `GUARD`・`CRASHED`。落ちる原因を直したら `CRASH_VER` を上げると、印を無効にできる。
+
 ## 動作確認
 - VS Code の Live Server で `index.html` を開く（右下の「Go Live」→ http://127.0.0.1:5500/ ）。
 - 確認の基本: PDFを開く → 縮尺が自動で入る → 距離/連続線/面積/円弧を計測 → 🧱壁の一括設定 → 展開図 → 書き出し。
@@ -44,6 +51,7 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - 試験（どれも「すべて合格」が出ればよい。部品の jsdom・ws は dxf-takeoff の試験と同じ `%LOCALAPPDATA%\dxf-takeoff`）：
   - `node test/link.mjs`：積算へ書き出した作業データを dxf-takeoff の材料積算（`../../dxf-takeoff/app/material-estimate.html`）で開き、同じ壁の面積が両方で同じかと、天井高＋100・画面の操作を確かめる。壁の計算・書き出し・壁の設定欄を変えたら流す。
   - `node test/security.mjs`：ログインの証明・入口・利用者の管理 API・管理の画面・初期設定の台本（にせの Cloudflare）・アプリの安全の直し。functions/・admin.html・tools/・ライブラリ・ログイン関係を変えたら流す。
+  - `node test/ipad.mjs`：iPad の条件で、線の多い図面を開く・拡大・ページ移動・落ちた後の軽い表示。PDF の読み込み・描画・線の読み取り・縮小画像を変えたら流す。
   - `node test/browser.mjs`：本物の Chrome（headless）で、公開先と同じ CSP の下で PDF を開けるか・外への通信が止まるか・管理の画面が動くか。ライブラリ・CSP・PDF の読み込みを変えたら流す。
 
 ## dxf-takeoff の積算とのつなぎ（2026-11-24 から）
