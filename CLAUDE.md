@@ -9,7 +9,7 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - `index.html` … アプリ本体（HTML・CSS・JavaScript をこの1ファイルに収めている）。**ここが正本**。
 - `cmaps-ja.json` … 日本語PDFの文字を読むための CMap（base64）。通常は触らない。
 - `lib/` … pdf.js 3.11.174（`pdf.min.js`・`pdf.worker.min.js`）、pdf-lib 1.17.1、日本語以外の CMap（`cmaps/`）。npm の公式パッケージから取り出し、CDN と同じ中身であることを確かめた物。**外の CDN からは読まない**（Claude 上など lib/ が無いときだけ、改ざん検査 SRI 付きで CDN を使う）。版を変えるときは `index.html` の `LIBS` の `sri` を作り直す（`test/security.mjs` が一致を確かめる）。
-- `sw.js` … オフライン起動用 Service Worker。**index.html を変えたら `VER` の番号を1つ上げる**（例 zumen-v12 → zumen-v13）。
+- `sw.js` … オフライン起動用 Service Worker。**index.html を変えたら `VER` の番号を1つ上げる**（例 zumen-v13 → zumen-v14）。
 - `manifest.webmanifest` / `icon-*.png` / `apple-touch-icon.png` … ホーム画面追加（PWA）用。
 - `admin.html` … 利用者（メールアドレス）の管理の画面。Cloudflare Pages の `/admin`。データは必ず `textContent` で出す（innerHTML に入れない）。
 - `functions/` … Cloudflare Pages Functions。
@@ -44,6 +44,15 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - PDF の中身の写しは持たない（`S.pdfFile`。書き出しは `readPdfBytes()`）。使い終わった canvas は `freeCanvas`。
 - 開く途中で落ちた図面は次に軽い表示（`S.safe`）。印は `GUARD`・`CRASHED`。落ちる原因を直したら `CRASH_VER` を上げると、印を無効にできる。
 
+## 区画の控え（動かすたびに描き直さない。2026-11-25 から）
+- ページは1回だけ細かく描き（`TILE_LONG`）、512px の区画（PNG）に分けて IndexedDB `zumen-tiles` に置く。線・索引（`packGeo`）・縮尺の判定・記号も一緒に置き、2回目からは PDF を読み解かない（`loadTiles`・`tget`）。
+- 見分けは **PDF の中身の SHA-256**（`S.hash`）。ファイル名を番号に使わない（改訂図と混ざる）。番号と持ち主は作業の始めに固定する（途中で図面が替わる）。パスワード付きの PDF は置かない。
+- **描き方・線の取り方・縮尺や記号の判定を変えたら `TILE_VER` を上げる**（上げないと、古い結果が出続ける）。
+- 図面を消す所では `tilesDropFile`、端末のデータを消す所では `tilesErase` を必ず呼ぶ。上限は `TILE_BYTES`（古い順に消す）。画像は Blob でなくデータ列で置く（プライベートブラウズの Safari のため）。
+- 動かす処理は `viewChanged` → `flushView`（1コマに1回）。線の多い図面（`S.heavy`）は、古い端末では「ここを鮮明に」（`renderHi(true)`）のときだけ描き直す。
+- 描きかけの表示（`onTick`）は Safari で描画を極端に遅くする。回数を増やさない。
+- 図面を開く処理は1件ずつ（`openLock`・`openSeq`）。開き替えた後に前の図面の続きを書かない。
+
 ## 動作確認
 - VS Code の Live Server で `index.html` を開く（右下の「Go Live」→ http://127.0.0.1:5500/ ）。
 - 確認の基本: PDFを開く → 縮尺が自動で入る → 距離/連続線/面積/円弧を計測 → 🧱壁の一括設定 → 展開図 → 書き出し。
@@ -52,7 +61,7 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
   - `node test/link.mjs`：積算へ書き出した作業データを dxf-takeoff の材料積算（`../../dxf-takeoff/app/material-estimate.html`）で開き、同じ壁の面積が両方で同じかと、天井高＋100・画面の操作を確かめる。壁の計算・書き出し・壁の設定欄を変えたら流す。
   - `node test/security.mjs`：ログインの証明・入口・利用者の管理 API・管理の画面・初期設定の台本（にせの Cloudflare）・アプリの安全の直し。functions/・admin.html・tools/・ライブラリ・ログイン関係を変えたら流す。
   - `node tools/fbbuild.mjs && node test/firebase.mjs`：Firebase のエミュレータと Chrome で、決まり・登録・名簿・外す・電波なし。firebase/・名簿・ログインを変えたら流す（Java が要る）。
-  - `node test/ipad.mjs`：iPad の条件で、線の多い図面を開く・拡大・ページ移動・落ちた後の軽い表示。PDF の読み込み・描画・線の読み取り・縮小画像を変えたら流す。
+  - `node test/ipad.mjs`：iPad の条件で、線の多い図面を開く・拡大・ページ移動・区画の控え（一致・取り違え・開き直し）・落ちた後の軽い表示。`ENGINE=webkit` でも流す（Chrome だけでは Safari の遅さに気付けない）。PDF の読み込み・描画・線の読み取り・縮小画像を変えたら流す。
   - `node test/browser.mjs`：本物の Chrome（headless）で、公開先と同じ CSP の下で PDF を開けるか・外への通信が止まるか・管理の画面が動くか。ライブラリ・CSP・PDF の読み込みを変えたら流す。
 
 ## dxf-takeoff の積算とのつなぎ（2026-11-24 から）

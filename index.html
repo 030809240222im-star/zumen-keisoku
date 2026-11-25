@@ -212,6 +212,8 @@ footer{padding-bottom:max(3px, env(safe-area-inset-bottom)); padding-left:max(10
 #loupe{position:absolute;width:150px;height:150px;border-radius:50%;border:2px solid var(--accent);box-shadow:0 6px 24px #000a;pointer-events:none;display:none;z-index:4;background:#fff}
 #actbar{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:none;gap:6px;z-index:5;background:#14171ce6;border:1px solid var(--line);border-radius:12px;padding:6px;box-shadow:0 8px 24px #0008}
 #actbar.show{display:flex}
+#bSharp{position:absolute;left:50%;bottom:calc(64px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:5;min-height:42px;padding:8px 18px;border-radius:21px;border:1px solid var(--line);background:#1b1f26f0;color:var(--text);font-size:14px;font-weight:700;box-shadow:0 2px 10px #0007}
+#bSharp:disabled{opacity:.75}
 #zoomctl{position:absolute;right:max(10px,env(safe-area-inset-right));bottom:84px;display:none;flex-direction:column;gap:6px;z-index:5}
 #zoomctl button{width:44px;height:44px;border-radius:12px;border:1px solid var(--line);background:#14171ce0;color:var(--text);font-size:20px;box-shadow:0 4px 14px #0007}
 @media (pointer:coarse){ #zoomctl{display:flex} }
@@ -544,6 +546,7 @@ header .grp{border-right:1px solid var(--line)} header .grp:last-child{border-ri
     <div class="aiq"><textarea id="aiQ" rows="2" placeholder="図面について質問（例：この階段の蹴上げ寸法は？）"></textarea><button class="mic" id="aiMic" style="display:none" title="音声入力">🎤</button><button class="btn pri" id="aiSend">送信</button></div>
     <div id="aiOut"></div>
     <div id="aiActs" style="display:none"><button class="mini" id="aiCopy">コピー</button><button class="mini" id="aiNote">付箋として貼る</button></div></div>
+  <button id="bSharp" style="display:none" title="今見えている範囲を、細かく描き直します">ここを鮮明に</button>
   <div id="zoomctl"><button id="zIn" aria-label="拡大">＋</button><button id="zOut" aria-label="縮小">－</button><button id="zFit" aria-label="全体表示">⤢</button></div>
   <div id="actbar"><span class="info" id="aInfo"></span><button id="aArc" title="次の辺を円弧にする（Q）">⌒ 円弧</button><button id="aBack" title="1点戻る">↶</button><button id="aCancel" title="取消">✕</button><button id="aDone" class="pri">確定</button></div>
 </div>
@@ -761,7 +764,9 @@ function cancelJob(j){ if (!j) return; j.cancelled=true; if (j.task) try{ j.task
 function pdfJob(pri, fn){ return new Promise((res,rej)=>{ PJ.q.push({pri,fn,res,rej,n:PJ.seq++}); if (PJ.cur && (PJ.cur.pri<pri || pri>=10)) cancelJob(PJ.cur); pumpJobs(); }); }
 async function pumpJobs(){
   if (PJ.cur) return;
-  while (PJ.q.length){ PJ.q.sort((a,b)=>b.pri-a.pri || a.n-b.n); const j=PJ.cur=PJ.q.shift();
+  while (PJ.q.length){ PJ.q.sort((a,b)=>b.pri-a.pri || a.n-b.n);
+    if (PJ.q[0].pri<=3){ const w=(S.movedAt||-1e9)+(LOWMEM? 1200 : 300)-performance.now(); if (w>0){ if (!PJ.wait) PJ.wait=setTimeout(()=>{ PJ.wait=0; pumpJobs(); }, w+10); return; } }   // 動かしている間・直後は、縮小画像・記号の検出を始めない
+    const j=PJ.cur=PJ.q.shift();
     try{ j.res(await j.fn(j)); }catch(e){ j.rej(e); } finally{ PJ.cur=null; } }
 }
 function dropJobs(){ const q=PJ.q.splice(0); cancelJob(PJ.cur); for (const j of q) j.rej(jobCancelled()); }
@@ -783,8 +788,10 @@ async function pdfRender(job, page, o){
   try{ task=page.render({canvasContext:o.canvasContext, viewport:o.viewport}); } finally{ PSTREAM.gate=null; }
   if (job) job.task=task;
   let st=null; if (page._intentStates) for (const v of page._intentStates.values()) for (const rt of v.renderTasks||[]) if (rt.task===task){ st=v; g.rt=rt; g.ol=v.operatorList; }
-  let h=0, rel=0, told=false;   // h：線を取り終えた位置、rel：捨てた数
+  let h=0, rel=0, told=false, tick=performance.now(), gap=3000;   // h：線を取り終えた位置、rel：捨てた数
   const step = end => { const ol=g.ol; if (!ol) return;
+    // 描きかけを見せる：Safari では描きながら表示すると描画が極端に遅くなるので、間を倍々に空け、重ければやめる
+    if (o.onTick && gap && performance.now()-tick>gap){ const t0=performance.now(); o.onTick(); tick=performance.now(); gap= tick-t0>250? 0 : gap*2.5; }
     if (o.harvest) for (; h<end; h++) o.harvest.feed(ol.fnArray[h], ol.argsArray[h]);
     // 描き終えた分を列から取り除き、描く位置をずらす（この描画だけが使っている列なので安全。描いている最中には行わない）
     if (stream && (told || end>OP_HEAVY) && end>=8192 && g.rt && g.rt.operatorListIdx===end){ ol.fnArray.splice(0,end); ol.argsArray.splice(0,end); g.rt.operatorListIdx=0; rel+=end; h=Math.max(0,h-end); if (!told){ told=true; if (o.onHeavy) o.onHeavy(); } } };
@@ -797,6 +804,67 @@ async function pdfRender(job, page, o){
     if (st && stream && (rel>0 || !fin)){ for (const [k,v] of page._intentStates) if (v===st) page._intentStates.delete(k);
       if (rel>0) page._zkHeavy=true; if (fin){ g.ol.argsArray.length=0; g.ol.fnArray.length=0; try{ page.cleanup(); }catch(e){} } } }
 }
+// ---------- 区画の画像（動かすたびに描き直さないための控え） ----------
+// ・ページを1回だけ細かく描き、512px の区画に分けて端末（IndexedDB の zumen-tiles）に置く。動かすときは貼るだけ
+// ・スナップ用の線・縮尺の判定・記号も一緒に置き、2回目からは PDF を読み解かずに出す
+// ・見分けは PDF の中身の SHA-256（同じ名前の改訂図と混ざらない）。パスワード付きの PDF は置かない
+// ・描き方・線の取り方を変えたら TILE_VER を上げる（古い控えは捨てる）
+const TILE=512, TILE_LONG= LOWMEM? 3600 : 4000, BASE_LONG=2000, TILE_VER=1, TILE_BYTES= LOWMEM? 400e6 : 1200e6;
+const TL={lru:new Map(), req:new Set(), raf:0, dbp:null};
+function tdb(){ return TL.dbp || (TL.dbp=new Promise(res=>{ try{ const q=indexedDB.open('zumen-tiles',1);
+  q.onupgradeneeded=()=>{ for (const n of ['page','geo','scan','idx']) q.result.createObjectStore(n); };
+  q.onsuccess=()=>{ const d=q.result; d.onversionchange=()=>{ d.close(); TL.dbp=null; }; res(d); }; q.onerror=q.onblocked=()=>res(null); }catch(e){ res(null); } })); }
+async function ttx(stores, mode, fn){ const db=await tdb(); if (!db) return undefined;
+  return new Promise(res=>{ try{ const t=db.transaction(stores,mode), q=fn(t); t.oncomplete=()=>res(q && 'result' in q? q.result : true); t.onerror=t.onabort=()=>res(undefined); }catch(e){ res(undefined); } }); }
+const tget=(store,k)=>ttx([store],'readonly',t=>t.objectStore(store).get(k));
+const tkey=n=> S.hash && S.isPdf? S.hash+'|'+n+'|'+TILE_VER : null;
+async function tput(k, recs, f){   // recs：{page:…, geo:…, scan:…}。まとめて1回で書く
+  if (!k) return; let size=0; const add=v=>{ if (ArrayBuffer.isView(v)) size+=v.byteLength; else if (Array.isArray(v)) v.forEach(add); else if (v && typeof v==='object') Object.values(v).forEach(add); }; add(recs.page); add(recs.geo); if (recs.scan) size+=200000;
+  const ok=await ttx([...Object.keys(recs),'idx'],'readwrite',t=>{ for (const n in recs) t.objectStore(n).put(recs[n],k); return t.objectStore('idx').put({k,size,t:Date.now(),f},k); });
+  if (ok!==undefined) tpurge(k); }
+const tdel=ks=>ks.length? ttx(['page','geo','scan','idx'],'readwrite',t=>{ for (const k of ks) for (const n of ['page','geo','scan','idx']) t.objectStore(n).delete(k); }) : null;
+async function tpurge(keep){ const L=await ttx(['idx'],'readonly',t=>t.objectStore('idx').getAll()); if (!Array.isArray(L)) return;
+  const old=L.filter(e=>!String(e.k).endsWith('|'+TILE_VER)).map(e=>e.k); let live=L.filter(e=>String(e.k).endsWith('|'+TILE_VER)).sort((a,b)=>a.t-b.t), total=live.reduce((a,e)=>a+e.size,0);
+  if (total>TILE_BYTES) for (const e of live){ if (total<TILE_BYTES*0.85) break; if (e.k===keep) continue; old.push(e.k); total-=e.size; }
+  await tdel(old); }
+const ttouch=k=>ttx(['idx'],'readwrite',t=>{ const o=t.objectStore('idx'), q=o.get(k); q.onsuccess=()=>{ const e=q.result; if (e && Date.now()-e.t>3600e3) o.put({...e,t:Date.now(),f:S.key},k); }; });
+// 図面を端末から消すときは、その控えも消す
+async function tilesDropFile(fkey){ const L=await ttx(['idx'],'readonly',t=>t.objectStore('idx').getAll()); if (Array.isArray(L)) await tdel(L.filter(e=>e.f===fkey).map(e=>e.k)); }
+async function tilesErase(){ try{ const db=await Promise.race([tdb(), new Promise(r=>setTimeout(r,1500))]); if (db && db.close) db.close(); }catch(e){} TL.dbp=null; await new Promise(res=>{ try{ const q=indexedDB.deleteDatabase('zumen-tiles'); q.onsuccess=q.onerror=q.onblocked=()=>res(); }catch(e){ res(); } }); }
+function tilesOff(){ for (const b of TL.lru.values()) b.close && b.close(); TL.lru.clear(); TL.req.clear(); S.tiles=null; }
+const canvasBlob=c=>new Promise(r=>{ try{ c.toBlob(r,'image/png'); }catch(e){ r(null); } });
+const recentMove=ms=>performance.now()-(S.movedAt||-1e9)<ms;
+// 描き終えた大きな画像を区画に分ける（指を動かしている間は待つ）
+async function makeTiles(big, n, tok, scale){
+  const W=big.width, H=big.height, cols=Math.ceil(W/TILE), rows=Math.ceil(H/TILE), blobs=[], gone=()=>tok!==pageToken || big.width!==W;
+  const bs=Math.min(1,BASE_LONG/Math.max(W,H)), base=document.createElement('canvas'); base.width=Math.max(1,Math.round(W*bs)); base.height=Math.max(1,Math.round(H*bs));
+  const bx=base.getContext('2d'); bx.imageSmoothingQuality='high'; bx.drawImage(big,0,0,base.width,base.height);
+  const c=document.createElement('canvas'); c.width=c.height=TILE; const x=c.getContext('2d');
+  try{ for (let i=0;i<cols*rows;i++){ while (recentMove(400)){ await new Promise(r=>setTimeout(r,200)); if (gone()) break; } if (gone()){ freeCanvas(base); return null; }
+      x.fillStyle='#fff'; x.fillRect(0,0,TILE,TILE); x.drawImage(big,-(i%cols)*TILE,-((i/cols)|0)*TILE); const b=await canvasBlob(c); if (!b){ freeCanvas(base); return null; } blobs.push(b); }
+  } finally{ freeCanvas(c); }
+  const bb=await canvasBlob(base); if (!bb || gone()){ freeCanvas(base); return null; }
+  return {W,H,cols,rows,scale,blobs,baseBlob:bb,base,w:S.W,h:S.H}; }
+const pngBlob=u=>new Blob([u],{type:'image/png'}), bytesOf=async b=>new Uint8Array(await b.arrayBuffer());
+async function loadTiles(k){ if (!k) return null; const r=await tget('page',k); if (!r || !Array.isArray(r.blobs) || r.blobs.length!==r.cols*r.rows || !(r.w>0 && r.h>0)) return null;
+  // 画像はデータ列で置く（プライベートブラウズの Safari は Blob を置けない）
+  try{ r.blobs=r.blobs.map(pngBlob); r.baseBlob=pngBlob(r.baseBlob); const bm=await createImageBitmap(r.baseBlob), c=document.createElement('canvas'); c.width=bm.width; c.height=bm.height; c.getContext('2d').drawImage(bm,0,0); bm.close(); ttouch(k); return {...r, base:c}; }
+  catch(e){ tdel([k]); return null; } }   // 控えが壊れていたら捨てて、ふつうに描く
+// 控えの線を、読み取ったときと同じ形に戻す
+function packGeo(g){ const {segs,pts,curves,N,P,NC,cs,gx,gy}=g; return {segs,pts,curves,N,P,NC,cs,gx,gy,gs:g.grid.st,gi:g.grid.idx,ps:g.pgrid.st,pi:g.pgrid.idx,qs:g.cgrid.st,qi:g.cgrid.idx}; }
+function unpackGeo(r){ const {cs,gx,gy}=r; return {segs:r.segs,pts:r.pts,curves:r.curves,N:r.N,P:r.P,NC:r.NC,cs,gx,gy,cell:cellOf(cs,gx,gy),grid:cellView(r.gs,r.gi),pgrid:cellView(r.ps,r.pi),cgrid:cellView(r.qs,r.qi),stamp:new Uint32Array(r.N),stampN:0}; }
+// 今の画面に入る区画
+function visTiles(){ const T=S.tiles; if (!T) return []; const P=[[0,0],[S.cw,0],[0,S.ch],[S.cw,S.ch]].map(([x,y])=>s2w({x,y})), k=T.scale/TILE;
+  const x0=Math.min(...P.map(p=>p.x))*k, x1=Math.max(...P.map(p=>p.x))*k, y0=Math.min(...P.map(p=>p.y))*k, y1=Math.max(...P.map(p=>p.y))*k, out=[];
+  for (let r=Math.max(0,Math.floor(y0)); r<Math.min(T.rows,Math.ceil(y1)); r++) for (let c=Math.max(0,Math.floor(x0)); c<Math.min(T.cols,Math.ceil(x1)); c++) out.push(r*T.cols+c); return out; }
+const tilesNeeded=()=>!!S.tiles && S.zoom*S.dpr > S.tiles.base.width/S.W*1.25;
+function wantTile(i){ const T=S.tiles, b=TL.lru.get(i); if (b){ TL.lru.delete(i); TL.lru.set(i,b); return b; }
+  if (TL.req.has(i) || TL.req.size>=6) return null; TL.req.add(i);
+  createImageBitmap(T.blobs[i]).then(bm=>{ if (S.tiles!==T){ bm.close(); return; } TL.req.delete(i); TL.lru.set(i,bm); const max=Math.max(LOWMEM?30:80, (T.vis||0)+10); while (TL.lru.size>max){ const [k,v]=TL.lru.entries().next().value; v.close(); TL.lru.delete(k); } redrawSoon(); })
+    .catch(()=>{ if (S.tiles===T){ TL.req.delete(i); T.bad=(T.bad||0)+1; if (T.bad===1 && T.key) tdel([T.key]); } }); return null; }
+function redrawSoon(){ if (!TL.raf) TL.raf=requestAnimationFrame(()=>{ TL.raf=0; drawBg(); }); }
+function drawTiles(c){ if (!tilesNeeded()) return; const T=S.tiles, v=visTiles(), q=TILE/T.scale; T.vis=v.length; if (v.length>90 || T.bad>3) return; for (const i of v){ const b=wantTile(i); if (b) c.drawImage(b,(i%T.cols)*q,((i/T.cols)|0)*q,q,q); } }
+const tilesReady=()=>!!S.tiles && (!tilesNeeded() || visTiles().every(i=>TL.lru.has(i)));
 // ---- 開いている途中で落ちた図面の印（次に開くときは軽い表示にする） ----
 const GUARD='pdfmeasure:resumeGuard', CRASHED='pdfmeasure:crashed', CRASH_VER=11;
 const lsGet = k => { try{ return JSON.parse(localStorage.getItem(k)||'null'); }catch(e){ return null; } };
@@ -809,15 +877,25 @@ function settled(key){ if (opening===key){ opening=null; clearGuard(); } }
 addEventListener('pagehide', clearGuard);
 document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState==='hidden') clearGuard(); else if (opening) setGuard(opening); });
 // ---------- loading ----------
+// 開くのは1件ずつ。続けて開き替えたら、前の図面の処理を打ち切ってから次に移る（前の図面のファイルや計測が、次の図面の名前で残らないように）
+let openSeq=0, openLock=Promise.resolve();
 async function openFile(f, opts={}){
-  if (!f) return;
+  if (!f) return; const seq=++openSeq;
   // 先に中身を確かめる（開けないファイルで今の図面を閉じてしまわない）
   let pre; const fkey='pdfmeasure:'+f.name+':'+f.size; opening=fkey; setGuard(fkey);
   try{ pre = await preloadFile(f); }catch(e){ console.error(e); settled(fkey); if (opts.resume) renderRecentCard(); busy(''); toast('開けませんでした：'+fileErrMsg(e)); return; }
+  const drop=()=>{ if (pre.doc) try{ pre.doc.destroy(); }catch(e){} };
+  if (seq!==openSeq) return drop();
+  pageToken++; if (PJ.cur && PJ.cur.pri>=10) cancelJob(PJ.cur);   // 開いている途中の図面の描画をやめる
+  const prev=openLock; let free; openLock=new Promise(r=>{ free=r; }); await prev;
+  try{ if (seq!==openSeq) return drop(); await openBody(f, opts, pre, fkey, seq); } finally{ free(); }
+}
+async function openBody(f, opts, pre, fkey, seq){
+  const stale=()=>seq!==openSeq;
   if (S.key){ flushAll(); } AS.resuming=true;
-  S.name=f.name; S.key=fkey; S.safe = !!pre.doc && LOWMEM && crashedBefore(fkey);
+  S.name=f.name; S.key=fkey; S.hash=pre.hash||null; pageToken++; S.heavy=false; tilesOff(); S.safe = !!pre.doc && LOWMEM && crashedBefore(fkey);
   S.meas={}; S.scales={}; S.rots={}; S.detect={}; S.schedule={}; S.marks={}; S.texts=null; S.markInfo=null; S.openPick=null; S.undo=[]; S.redo=[]; S.ann={}; S.bm={}; S.updatedAt=0; S.outline=null; S.vtexts={}; S.stexts={}; S.links=[]; S.pdfFile=null; clearSel(); IMGC.clear(); S.sel=null; S.draft=null; S.geo=null; S.geoPage=0; S.idSeq=1;
-  const restored = await loadState();
+  const restored = await loadState(); if (stale()){ AS.resuming=false; if (pre.doc && S.doc!==pre.doc) try{ pre.doc.destroy(); }catch(e){} S.key=null; return; }   // 読んだ計測を、次の図面に持ち込まない
   // 端末ごとに重ならない番号から採番（PCとiPhoneで同時に追加しても同じIDにならない）
   S.idSeq = Math.max(S.idSeq||1, Math.floor(Date.now()/1000)*1000 + Math.floor(Math.random()*1000));
   $('#drop').style.display='none';
@@ -826,9 +904,9 @@ async function openFile(f, opts={}){
     if (pre.doc){ if (S.doc && S.doc!==pre.doc) { const od=S.doc; S.doc=null; S.pdfPage=null; dropJobs(); if (S.preview!==S.img) freeCanvas(S.preview); S.preview=null; try{ od.destroy(); }catch(e){} } S.pdfFile=f; S.doc=pre.doc; hookStream(S.doc); S.isPdf=true; S.img=null; S.nPages=S.doc.numPages; S.encrypted=pre.encrypted; }
     else { dropJobs(); if (S.preview!==S.img) freeCanvas(S.preview); S.img=pre.img; S.pdfPage=null; if (S.doc) try{ S.doc.destroy(); }catch(e){} S.doc=null; S.isPdf=false; S.nPages=1; S.encrypted=false; }
     $('#pgn').textContent='/ '+S.nPages; buildThumbs();
-    await gotoPage(1, true);
-    storeFile(f);
-    const v = await restoreView(); AS.resuming=false; AS.lastSnapHash=''; snapshot('ファイルを開いた時点'); saveSession(); setSaveSt(AS.lastSaved? 'ok' : 'idle');
+    await gotoPage(1, true); if (stale()){ AS.resuming=false; return; }
+    storeFile(f, fkey);
+    const v = await restoreView(); AS.resuming=false; if (stale()) return; AS.lastSnapHash=''; snapshot('ファイルを開いた時点'); saveSession(); setSaveSt(AS.lastSaved? 'ok' : 'idle');
     // 裏の仕事（縮尺・記号）が終わるまでは「開いている途中」。ここで落ちたら次は軽い表示で開く
     setTimeout(async()=>{ try{ await S.bg; if (S.key===fkey) await scanOpenings(); }catch(e){ console.warn('scan',e); } settled(fkey); }, 400);
     if (CLOUD.on) cloudPull(); refreshBmBtn(); if (S.leftTab==='bm') renderBm();
@@ -836,7 +914,7 @@ async function openFile(f, opts={}){
     if (S.safe) toast('前回この図面の途中で落ちたため、軽い表示で開きました（スナップ・縮尺と記号の自動検出・縮小画像は切っています）');
     else if (opts.resume) toast(`前回の作業を復元しました（${S.page}ページ・計測${Object.values(S.meas).reduce((a,b)=>a+b.length,0)}件・書込${Object.values(S.ann).reduce((a,b)=>a+b.length,0)}件）`);
     else if (restored) toast(v? `前回の続きから表示しました（${S.page}ページ）` : '前回の計測データを復元しました');
-  }catch(e){ console.error(e); busy(''); AS.resuming=false; settled(fkey); toast('読み込み失敗: '+e.message); $('#drop').style.display=''; }
+  }catch(e){ if (stale()){ AS.resuming=false; return; } console.error(e); busy(''); AS.resuming=false; settled(fkey); toast('読み込み失敗: '+e.message); $('#drop').style.display=''; }
 }
 
 const PDF_OPTS={isEvalSupported:false, CMapReaderFactory:JaCMapFactory, cMapUrl:'ja/', cMapPacked:true, useSystemFonts:true, enableXfa:false, ...(LOWMEM? {canvasMaxAreaInBytes:4096*4096*4} : {})};
@@ -850,14 +928,15 @@ async function preloadFile(f){
   if (isPdf){
     if (!(await ensurePdfjs())) throw new Error('PDFライブラリを読み込めませんでした（通信環境を確認してください）');
     if (f.size>300*1024*1024) throw new Error('ファイルが大きすぎます（300MBまで）');
-    const task=pdfjsLib.getDocument({...PDF_OPTS, data:await f.arrayBuffer()});   // 中身は worker に渡す（写しを持たない。書き出すときに読み直す）
+    const data=await f.arrayBuffer(); let hash=null; try{ if (crypto.subtle) hash=[...new Uint8Array(await crypto.subtle.digest('SHA-256', data))].map(b=>b.toString(16).padStart(2,'0')).join(''); }catch(e){}
+    const task=pdfjsLib.getDocument({...PDF_OPTS, data});   // 中身は worker に渡す（写しを持たない。書き出すときに読み直す）
     let tries=0; task.onPassword=(update, reason)=>{ tries++; if (tries>3){ task.destroy(); return; }
       const pw=prompt((reason===2? 'パスワードが違います。' : 'このPDFはパスワードで保護されています。')+'\nパスワードを入力してください（'+f.name+'）'); if (pw==null){ task.destroy(); return; } update(pw); };
     const doc=await task.promise; let encrypted=false;
     try{ const md=await doc.getMetadata(); encrypted=!!(md && md.info && md.info.EncryptFilterName); }catch(e){}
     if (!encrypted) encrypted = /\/Encrypt\s/.test(new TextDecoder('latin1').decode(await f.slice(Math.max(0,f.size-4096)).arrayBuffer()));
     if (!doc.numPages) throw new Error('ページがありません');
-    return {doc, encrypted};
+    return {doc, encrypted, hash: encrypted? null : hash};
   }
   if (!/^image\//.test(f.type) && !/\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name)) throw new Error('対応していない形式です（PDF・PNG・JPEG）');
   const url=URL.createObjectURL(f); const img=new Image(); img.src=url; await img.decode();
@@ -891,7 +970,9 @@ async function pumpThumbs(){
       const n=TH.queue.shift(); if (TH.canvases[n]) continue;
       const c=document.createElement('canvas'); const tw= LOWMEM? 260 : Math.round(260*Math.min(2,window.devicePixelRatio||1)/2*2);
       if (S.isPdf){
-        try{ await pdfJob(3, async job=>{ if (tok!==TH.token || !S.doc) return;
+        const k0=tkey(n), rec=k0 && n!==S.page? await tget('page',k0) : null; if (tok!==TH.token) return;   // 控えのあるページは、PDF を読まずに作る
+        let done=false; if (rec && rec.baseBlob) try{ const bm=await createImageBitmap(pngBlob(rec.baseBlob)); c.width=tw; c.height=Math.max(1,Math.round(tw*bm.height/bm.width)); const cx=c.getContext('2d'); cx.imageSmoothingQuality='high'; cx.drawImage(bm,0,0,c.width,c.height); bm.close(); done=true; }catch(e){}
+        if (!done) try{ await pdfJob(3, async job=>{ if (tok!==TH.token || !S.doc) return;
           if (n===S.page && S.preview){ c.width=tw; c.height=Math.max(1,Math.round(tw*S.preview.height/S.preview.width)); const cx=c.getContext('2d'); cx.imageSmoothingQuality='high'; cx.drawImage(S.preview,0,0,c.width,c.height); return; }   // 表示中のページは描き直さない
           const page=await S.doc.getPage(n); const v1=page.getViewport({scale:1}); const vp=page.getViewport({scale:tw/v1.width});
           c.width=Math.ceil(vp.width); c.height=Math.ceil(vp.height); const cx=c.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,c.width,c.height);
@@ -929,36 +1010,54 @@ async function gotoPage(n, fit){
   busy('ページ描画中…');
   if (S.isPdf){
     cancelHi(); const old=S.pdfPage; S.pdfPage=null; if (old) try{ old.cleanup(); }catch(e){}
-    if (LOWMEM && S.preview){ freeCanvas(S.preview); S.preview=null; }
-    let page, vp, hv=null;
+    tilesOff(); S.heavy=false;
+    const key=tkey(n), fkey=S.key, rec=await loadTiles(key); if (tok!==pageToken){ if (rec) freeCanvas(rec.base); return; }
+    if (rec){
+      // 控えがある：PDF を読み解かずに出す（ページの情報は後から）
+      S.W=rec.w; S.H=rec.h; if (S.preview && S.preview!==S.img) freeCanvas(S.preview);
+      rec.key=key; S.tiles=rec; S.preview=rec.base; S.previewScale=rec.base.width/rec.w; S.heavy=!!rec.heavy; busy('');
+      if (fit || !S._fitOnce) fitView(); else drawBg(); S._fitOnce=true;
+      const doc=S.doc; S.geoSkip=0;
+      S.bg=(async()=>{ const r=await tget('geo', key); if (tok!==pageToken) return; if (r){ S.geo=unpackGeo(r); S.geoPage=n; setHint(); } if (rec.detect){ S.detect[n]=rec.detect; applyAutoScale(n); setHint(); } })().catch(e=>console.warn('geo',e));
+      pdfJob(5, async()=>{ if (tok!==pageToken || doc!==S.doc) return; const page=await doc.getPage(n); if (tok!==pageToken) return; S.pdfPage=page; if (S.heavy) page._zkHeavy=true; loadLinks(page, page.getViewport({scale:1}), n); clearTimeout(hiTimer); hiTimer=setTimeout(renderHi,200); }).catch(()=>{});
+      refreshAll(); return;
+    }
+    if (LOWMEM && S.preview){ if (S.preview!==S.img) freeCanvas(S.preview); S.preview=null; }
+    let page, vp, hv=null, big=null, ps=1, early=false;
+    const put=()=>{ if (S.preview && S.preview!==S.img && S.preview!==big) freeCanvas(S.preview); S.preview=big; S.previewScale=ps; };
     try{ await pdfJob(10, async job=>{
       if (tok!==pageToken || !S.doc) throw jobCancelled();
       page = await S.doc.getPage(n); if (tok!==pageToken) throw jobCancelled();
       vp=page.getViewport({scale:1}); S.W=vp.width; S.H=vp.height;
-      // preview bitmap
-      const ps = Math.min(4, (S.safe? 2000 : LOWMEM? 3000 : isMobile()? 2400 : 3600)/Math.max(S.W,S.H));
-      const c=document.createElement('canvas'); const pv=page.getViewport({scale:ps});
+      ps = Math.min(4, (S.safe? 2000 : TILE_LONG)/Math.max(S.W,S.H));
+      const c=big=document.createElement('canvas'); const pv=page.getViewport({scale:ps});
       c.width=Math.ceil(pv.width); c.height=Math.ceil(pv.height);
       const cx=c.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,c.width,c.height);
       if (!S.safe) hv=new GeoHarvest(vp.transform);
-      try{ await pdfRender(job, page, {canvasContext:cx, viewport:pv, harvest:hv, onHeavy:()=>{ if (tok===pageToken) busy('ページ描画中…（線の多い図面のため時間がかかります）'); }}); }
-      catch(e){ freeCanvas(c); try{ page.cleanup(); }catch(_){} throw e; }
-      if (tok!==pageToken){ freeCanvas(c); try{ page.cleanup(); }catch(_){} throw jobCancelled(); }
-      if (S.preview && S.preview!==S.img) freeCanvas(S.preview);
-      S.pdfPage=page; S.preview=c; S.previewScale=ps;
+      const drop=()=>{ if (S.preview===c) S.preview=null; freeCanvas(c); try{ page.cleanup(); }catch(_){} };
+      // 時間のかかるページは、描きかけを見せる
+      const onTick=()=>{ if (tok!==pageToken) return; if (!early){ early=true; put(); if (fit || !S._fitOnce) fitView(); S._fitOnce=true; } cancelAnimationFrame(TL.raf); TL.raf=0; drawBg(); };
+      try{ await pdfRender(job, page, {canvasContext:cx, viewport:pv, harvest:hv, onTick, onHeavy:()=>{ if (tok===pageToken) busy('ページ描画中…（線の多い図面のため、初めてだけ時間がかかります）'); }}); }
+      catch(e){ drop(); throw e; }
+      if (tok!==pageToken){ drop(); throw jobCancelled(); }
+      put(); S.pdfPage=page; S.heavy=!!page._zkHeavy;
       if (TH.heavy[n] && !TH.canvases[n] && !S.safe){ TH.queue.push(n); setTimeout(pumpThumbs,0); }
     }); }catch(e){ if (isCancel(e) && tok!==pageToken) return; throw e; }
     if (tok!==pageToken) return;
     loadLinks(page, vp, n);
     busy('');
-    if (fit || !S._fitOnce) fitView(); else { drawBg(); }
+    if (!early && (fit || !S._fitOnce)) fitView(); else drawBg();
     S._fitOnce=true;
-    // vector geometry for snapping（描画と同時に取った線）→ 縮尺の自動判定
+    // vector geometry for snapping（描画と同時に取った線）→ 縮尺の自動判定 → 区画の控え
+    S.geoSkip = hv? 0 : 1;
     S.bg = hv? (async()=>{ await new Promise(r=>setTimeout(r,30)); if (tok!==pageToken) return;
-      const g = hv.ok? hv.build() : await extractGeometry(page, vp); hv=null; if (tok!==pageToken) return; S.geo=g; S.geoPage=n; setHint();
-      try{ const d=await pdfJob(6, ()=>tok===pageToken? detectScale(page, vp, g) : null); if (d){ S.detect[n]=d; if (tok===pageToken){ applyAutoScale(n); setHint(); } } }catch(e){ if (!isCancel(e)) console.warn('detect',e); }
+      const g = hv.ok? hv.build() : await extractGeometry(page, vp); hv=null; if (tok!==pageToken) return; S.geo=g; S.geoPage=n; setHint(); let found=null;
+      try{ const d=await pdfJob(6, ()=>tok===pageToken? detectScale(page, vp, g) : null); if (d){ found=d; S.detect[n]=d; if (tok===pageToken){ applyAutoScale(n); setHint(); } } }catch(e){ if (!isCancel(e)) console.warn('detect',e); }
+      if (tok!==pageToken) return;
+      const T=await makeTiles(big, n, tok, ps); if (!T) return; if (tok!==pageToken){ freeCanvas(T.base); return; }
+      T.heavy=S.heavy; T.key=key; S.tiles=T; S.preview=T.base; S.previewScale=T.base.width/T.w; freeCanvas(big); redrawSoon(); clearTimeout(hiTimer); hiTimer=setTimeout(renderHi,300);
+      if (key && found){ const {W,H,cols,rows,scale,w,h,heavy}=T, rec={W,H,cols,rows,scale,w,h,heavy,detect:found,baseBlob:await bytesOf(T.baseBlob),blobs:[]}; for (const b of T.blobs) rec.blobs.push(await bytesOf(b)); await tput(key,{page:rec, geo:packGeo(g)}, fkey); }
     })().catch(e=>console.warn('geometry',e)) : Promise.resolve();
-    if (!hv) S.geoSkip=1; else S.geoSkip=0;
   } else {
     S.W=S.img.naturalWidth; S.H=S.img.naturalHeight; S.preview=S.img; S.previewScale=1; busy(''); fitView();
   }
@@ -1011,15 +1110,17 @@ class GeoHarvest{
 // 予備：描画から取れなかったとき（pdf.js の中の作りが変わったとき）だけ、命令を別に読む
 async function extractGeometry(page, vp){ const ol=await page.getOperatorList(); const h=new GeoHarvest(vp.transform); for (let i=0;i<ol.fnArray.length;i++) h.feed(ol.fnArray[i], ol.argsArray[i]); return h.build(); }
 // 升目ごとの一覧を、数値の列2本で持つ（Map と配列の束より小さい）
+const cellView=(st,idx)=>({st, idx, get:k=> k>=0 && k<st.length-1 && st[k+1]>st[k]? idx.subarray(st[k], st[k+1]) : undefined});
 function cellIndex(total, each){
   const st=new Uint32Array(total+1); each(k=>{ if (k>=0 && k<total) st[k+1]++; }); for (let i=0;i<total;i++) st[i+1]+=st[i];
   const at=st.slice(0,total), idx=new Uint32Array(st[total]); each((k,v)=>{ if (k>=0 && k<total) idx[at[k]++]=v; });
-  return {get:k=> k>=0 && k<total && st[k+1]>st[k]? idx.subarray(st[k], st[k+1]) : undefined};
+  return cellView(st, idx);
 }
+const cellOf=(cs,gx,gy)=>(x,y)=>{ let i=Math.floor(x/cs)+1, j=Math.floor(y/cs)+1; i=i<0?0:i>=gx?gx-1:i; j=j<0?0:j>=gy?gy-1:j; return [i,j]; };
 function buildIndex(segs, pts, curves){
   const W=S.W, H=S.H; const N=segs.length/4;
   const cs = Math.max(W,H)/160; const gx=Math.ceil(W/cs)+2, gy=Math.ceil(H/cs)+2, total=gx*gy;
-  const cell=(x,y)=>{ let i=Math.floor(x/cs)+1, j=Math.floor(y/cs)+1; i=i<0?0:i>=gx?gx-1:i; j=j<0?0:j>=gy?gy-1:j; return [i,j]; };
+  const cell=cellOf(cs,gx,gy);
   const M=Math.max(W,H)*0.05;
   // ページの外まで延びる線は、ページ範囲に切り詰めてから索引に入れる（極端に長い線で固まらないように）
   const clip=(x1,y1,x2,y2)=>{ let t0=0,t1=1; const dx=x2-x1, dy=y2-y1;
@@ -1291,38 +1392,50 @@ function zoomAt(f, sx, sy){
   const nz=clampZ(S.zoom*f); f=nz/S.zoom;
   S.px = sx-(sx-S.px)*f; S.py = sy-(sy-S.py)*f; S.zoom=nz; viewChanged();
 }
-let viewVer=0, hiTimer=0, hiTask=null;
-function cancelHi(){ clearTimeout(hiTimer); if (hiTask){ cancelJob(hiTask); hiTask=null; } if (S.hi){ freeCanvas(S.hi.canvas); S.hi=null; } }
-function viewChanged(){ if (!Number.isFinite(S.zoom) || S.zoom<=0) S.zoom=1; if (!Number.isFinite(S.px)) S.px=0; if (!Number.isFinite(S.py)) S.py=0; viewVer++; scheduleSession(); drawAnn(); if (S.editing){ const it=S.editing.it, p=w2s({x:it.x,y:it.y}), ed=$('#txted'); ed.style.left=p.x+'px'; ed.style.top=p.y+'px'; ed.style.fontSize=(it.size*S.zoom)+'px'; } $('#rt').textContent=rot()+'°'; drawBg(); drawOv(); $('#sz').textContent=(S.zoom*(S.isPdf?1:1)*100).toFixed(0)+'%'; cancelHi(); hiTimer=setTimeout(renderHi, S.pdfPage && S.pdfPage._zkHeavy? 900 : 160); }
+let viewVer=0, hiTimer=0, hiTask=null, viewRaf=0;
+function stopHi(){ clearTimeout(hiTimer); if (hiTask){ cancelJob(hiTask); hiTask=null; } }
+function cancelHi(){ stopHi(); if (S.hi){ freeCanvas(S.hi.canvas); S.hi=null; } }
+function viewChanged(){ if (!Number.isFinite(S.zoom) || S.zoom<=0) S.zoom=1; if (!Number.isFinite(S.px)) S.px=0; if (!Number.isFinite(S.py)) S.py=0;
+  viewVer++; S.movedAt=performance.now(); scheduleSession(); if (PJ.cur && PJ.cur.pri===3) cancelJob(PJ.cur);   // 縮小画像は後に回す
+  stopHi(); hiTimer=setTimeout(renderHi, S.heavy? 900 : LOWMEM? 350 : 160); if (!viewRaf) viewRaf=requestAnimationFrame(flushView); }
+// 指・ホイールの動きは1コマに何度も来る。描くのは1コマに1回
+function flushView(){ viewRaf=0; drawAnn(); if (S.editing){ const it=S.editing.it, p=w2s({x:it.x,y:it.y}), ed=$('#txted'); ed.style.left=p.x+'px'; ed.style.top=p.y+'px'; ed.style.fontSize=(it.size*S.zoom)+'px'; } $('#rt').textContent=rot()+'°'; drawBg(); drawOv(); $('#sz').textContent=(S.zoom*100).toFixed(0)+'%'; updateSharp(); }
 function drawBg(){
   const c=bctx, d=S.dpr; c.setTransform(1,0,0,1,0,0); c.fillStyle='#3a3f48'; c.fillRect(0,0,bg.width,bg.height);
   if (!S.preview) return;
   c.setTransform(d,0,0,d,0,0);
   if (!LOWMEM){ c.fillStyle='#000'; c.shadowColor='rgba(0,0,0,.35)'; c.shadowBlur=12; c.fillRect(S.px,S.py,RW()*S.zoom,RH()*S.zoom); c.shadowBlur=0; }
   const M=viewMatrix(); c.setTransform(M[0]*d,M[1]*d,M[2]*d,M[3]*d,M[4]*d,M[5]*d);
-  c.imageSmoothingEnabled = S.zoom*d < S.previewScale*1.5 || !S.isPdf;
+  c.imageSmoothingEnabled = S.zoom*d < S.previewScale*1.5 || !S.isPdf || !!S.tiles;
   c.imageSmoothingQuality='high';
   c.drawImage(S.preview, 0, 0, S.W, S.H);
-  if (S.hi && S.hi.ver===viewVer) { c.setTransform(1,0,0,1,0,0); c.drawImage(S.hi.canvas,0,0); }
+  if (S.tiles){ c.imageSmoothingEnabled=true; c.imageSmoothingQuality= recentMove(200)? 'low' : 'medium'; drawTiles(c); }
+  // 高精細の画像は、動かした後もずらして使う（新しく描けるまでの間も鮮明に）
+  const hi=S.hi; if (hi && hi.page===S.page && hi.rot===rot()){ const z=S.zoom/hi.zoom; if (z>0.5 && z<4){ c.setTransform(1,0,0,1,0,0); c.save(); c.beginPath(); c.rect(S.px*d,S.py*d,RW()*S.zoom*d,RH()*S.zoom*d); c.clip(); c.drawImage(hi.canvas,(S.px-hi.px*z)*d,(S.py-hi.py*z)*d,hi.canvas.width*z,hi.canvas.height*z); c.restore(); } }
 }
-async function renderHi(){
-  if (!S.isPdf || !S.pdfPage || !S.preview) return;
-  const sc=S.zoom*S.dpr; if (sc <= S.previewScale*1.05) return;
-  const ver=viewVer, pg=S.page, r0=rot(), page=S.pdfPage; cancelHi();
+const sharpScale=()=>S.tiles? S.tiles.scale : S.previewScale;
+async function renderHi(force){
+  force = force===true; if (!S.isPdf || !S.pdfPage || !S.preview) return;
+  const sc=S.zoom*S.dpr; if (sc <= sharpScale()*1.05 || (S.hi && S.hi.ver===viewVer)) return;
+  if (LOWMEM && S.heavy && !force){ updateSharp(); return; }   // 線の多い図面は、頼まれたときだけ描き直す
+  const ver=viewVer, pg=S.page, r0=rot(), page=S.pdfPage; stopHi();
   const stale=()=> ver!==viewVer || pg!==S.page || r0!==rot() || page!==S.pdfPage;
   try{ await pdfJob(8, async job=>{
-    if (stale()) return; hiTask=job;
+    if (stale()) return; hiTask=job; if (force) updateSharp(true);
     const c=document.createElement('canvas'); c.width=bg.width; c.height=bg.height;
     const cx=c.getContext('2d');
     // white page area only
     cx.fillStyle='#3a3f48'; cx.fillRect(0,0,c.width,c.height);
     cx.fillStyle='#fff'; cx.fillRect(S.px*S.dpr, S.py*S.dpr, RW()*sc, RH()*sc);
-    const vp=page.getViewport({scale:sc, rotation:(page.rotate+rot())%360, offsetX:S.px*S.dpr, offsetY:S.py*S.dpr});
+    const px=S.px, py=S.py, zoom=S.zoom, vp=page.getViewport({scale:sc, rotation:(page.rotate+rot())%360, offsetX:S.px*S.dpr, offsetY:S.py*S.dpr});
     try{ await pdfRender(job, page, {canvasContext:cx, viewport:vp}); }catch(e){ freeCanvas(c); throw e; } finally{ if (hiTask===job) hiTask=null; }
     if (stale()){ freeCanvas(c); return; }
-    if (S.hi) freeCanvas(S.hi.canvas); S.hi={canvas:c, ver}; drawBg();
-  }); }catch(e){}
+    if (S.hi) freeCanvas(S.hi.canvas); S.hi={canvas:c, ver, px, py, zoom, rot:r0, page:pg}; drawBg();
+  }); }catch(e){} updateSharp();
 }
+// 線の多い図面（古い端末）：「ここを鮮明に」ボタン
+function updateSharp(on){ const b=$('#bSharp'); if (!b) return; const show= LOWMEM && S.isPdf && !!S.pdfPage && S.heavy && !!S.preview && S.zoom*S.dpr>sharpScale()*1.15 && !(S.hi && S.hi.ver===viewVer);
+  b.style.display= show||on? 'block' : 'none'; b.disabled=!!on; b.textContent= on? '描いています…（動かすと止まります）' : 'ここを鮮明に'; }
 
 // ---------- overlay drawing ----------
 function drawOv(){
@@ -2067,12 +2180,14 @@ function saveWallDef(){ try{ localStorage.setItem('pdfmeasure:walldef', JSON.str
 // ---- PDF全ページから開口記号・建具表サイズを抽出 ----
 async function scanOpenings(){
   if (!S.isPdf || !S.doc) return;
-  if (S.safe){ S.texts={}; S.markInfo={n:0, kinds:0, sched:0}; refreshProps(); return; }
-  const doc=S.doc, marks={}, sched={}, texts={}; const SZ=/^W?[=:]?(\d{3,4})[×xX*＊]H?[=:]?(\d{3,4})$/i;
-  for (let n=1;n<=S.nPages;n++){
-    if (doc!==S.doc) return;
+  const doc=S.doc, skey=S.key, marks={}, sched={}, texts={}, sk= S.hash? S.hash+'|scan|'+TILE_VER : null, had= sk? await tget('scan',sk) : null; if (doc!==S.doc || skey!==S.key) return;
+  if (had){ Object.assign(marks,had.marks); Object.assign(sched,had.sched); Object.assign(texts,had.texts); S.stexts=had.stexts; S.vtexts=had.vtexts; }
+  else if (S.safe){ S.texts={}; S.markInfo={n:0, kinds:0, sched:0}; refreshProps(); return; }
+  const SZ=/^W?[=:]?(\d{3,4})[×xX*＊]H?[=:]?(\d{3,4})$/i;
+  for (let n=1;n<=S.nPages && !had;n++){
+    if (doc!==S.doc || skey!==S.key) return;
     let page, tc; try{ await pdfJob(2, async()=>{ if (doc!==S.doc) return; page=await doc.getPage(n); tc= S._tc && S._tc.doc===doc && S._tc.n===n? S._tc.tc : await page.getTextContent(); if (S._tc && S._tc.n===n) S._tc=null; if (n!==S.page) try{ page.cleanup(); }catch(e){} }); }catch(e){ continue; }
-    if (doc!==S.doc) return; if (!tc) continue;
+    if (doc!==S.doc || skey!==S.key) return; if (!tc) continue;
     if (n%3===0) await new Promise(r=>setTimeout(r,0));   // 画面を固めない
     const vp=page.getViewport({scale:1}), T=vp.transform;
     const its=tc.items.filter(i=>i.str&&i.str.trim()).map(i=>{ const [a,b,c,d,e,f]=i.transform; return {s:nz(i.str).replace(/,/g,''), raw:i.str, x:T[0]*e+T[2]*f+T[4], y:T[1]*e+T[3]*f+T[5], h:Math.hypot(c,d)||8, w:i.width||0, hor:Math.abs(b)<1e-3&&a>0}; });
@@ -2097,6 +2212,7 @@ async function scanOpenings(){
       const w=near(Ws), h=near(Hs); if (w&&h) sched[k.mark]={w:w.v,h:h.v,page:n,src:'建具表/表記'};
     }
   }
+  if (!had && sk) tput(sk,{scan:{marks,sched:JSON.parse(JSON.stringify(sched)),texts,stexts:S.stexts,vtexts:S.vtexts}}, skey);
   S.marks=marks; S.texts=texts; for (const k in sched) if (!S.schedule[k] || S.schedule[k].src!=='手入力') S.schedule[k]=sched[k];
   const nm=Object.values(marks).reduce((a,b)=>a+b.length,0);
   S.markInfo={n:nm, kinds:[...new Set(Object.values(marks).flat().map(m=>m.mark))].length, sched:Object.keys(sched).length};
@@ -3331,7 +3447,7 @@ async function exportPdf(btn){
 async function exportPng(){
   if (!S.W) return; busy('画像を作成中…');
   try{ let base, W=S.W, H=S.H;
-    if (S.isPdf){ const page=S.pdfPage; const sc=Math.min(3, 4000/Math.max(W,H)); const vp=page.getViewport({scale:sc}); base=document.createElement('canvas'); base.width=Math.ceil(vp.width); base.height=Math.ceil(vp.height); const x=base.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,base.width,base.height); await pdfJob(9, ()=>pdfRender(null, page, {canvasContext:x, viewport:vp})); const ov=renderOverlayFor(S.page,W,H,sc); x.drawImage(ov,0,0); }
+    if (S.isPdf){ const page=S.pdfPage || await S.doc.getPage(S.page); const sc=Math.min(3, 4000/Math.max(W,H)); const vp=page.getViewport({scale:sc}); base=document.createElement('canvas'); base.width=Math.ceil(vp.width); base.height=Math.ceil(vp.height); const x=base.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,base.width,base.height); await pdfJob(9, ()=>pdfRender(null, page, {canvasContext:x, viewport:vp})); const ov=renderOverlayFor(S.page,W,H,sc); x.drawImage(ov,0,0); }
     else { base=document.createElement('canvas'); base.width=W; base.height=H; const x=base.getContext('2d'); x.drawImage(S.img,0,0); x.drawImage(renderOverlayFor(S.page,W,H,1),0,0); }
     const out=rotCanvas(base, rot()); busy(''); await saveFile(`${baseName()}_p${S.page}.png`, await toBlob(out));
   }catch(e){ busy(''); toast('画像の作成に失敗しました'); }
@@ -3610,14 +3726,14 @@ async function updateRecent(patch){
   r.list.sort((a,b)=>b.t-a.t); await idbPut('session', r);
 }
 // ---- ファイル本体の保存（次回そのまま再開できるように） ----
-async function storeFile(f){
-  const key=S.key; const ex=await idbGet('files', key);
+async function storeFile(f, key){
+  const ex=await idbGet('files', key);
   if (!ex) await idbPut('files', {key, name:f.name, type:f.type||(/\.pdf$/i.test(f.name)?'application/pdf':''), size:f.size, blob:f, t:Date.now()});
   const thumb = S.preview? (()=>{ try{ const c=document.createElement('canvas'); const k=140/Math.max(S.preview.width,S.preview.height); c.width=Math.round(S.preview.width*k); c.height=Math.round(S.preview.height*k); c.getContext('2d').drawImage(S.preview,0,0,c.width,c.height); return c.toDataURL('image/jpeg',0.6); }catch(e){ return null; } })() : null;
-  await updateRecent({size:f.size, thumb, hasFile:true});
+  if (key!==S.key) return; await updateRecent({size:f.size, thumb, hasFile:true});
   // 古いファイル本体を整理（最大12件・合計800MB）
   const r=await idbGet('session','recent'); if (!r) return; let total=0, n=0;
-  for (const e of r.list){ if (!e.hasFile) continue; n++; total+=e.size||0; if (e.key!==key && (n>12 || total>800e6)){ await idbDel('files', e.key); e.hasFile=false; } }
+  for (const e of r.list){ if (!e.hasFile) continue; n++; total+=e.size||0; if (e.key!==key && (n>12 || total>800e6)){ await idbDel('files', e.key); await tilesDropFile(e.key); e.hasFile=false; } }
   await idbPut('session', r);
 }
 // ---- 履歴（スナップショット） ----
@@ -3661,7 +3777,7 @@ async function openHistory(tab){
     body.querySelectorAll('[data-of]').forEach(b=>b.onclick=async()=>{ closeModal(); await openStored(b.dataset.of); });
     body.querySelectorAll('[data-df]').forEach(b=>b.onclick=async()=>{ const k=b.dataset.df; const row=b.closest('.hrow');
       if (!row.classList.contains('confirm')){ row.classList.add('confirm'); b.textContent='削除?'; return; }
-      await idbDel('files',k); await idbDel('data',k); await idbDel('session','view:'+k); await idbDel('session','undo:'+k); for (const s of ((await idbSnaps(k))||[])) await idbDel('snaps',s.id);
+      await idbDel('files',k); await tilesDropFile(k); await idbDel('data',k); await idbDel('session','view:'+k); await idbDel('session','undo:'+k); for (const s of ((await idbSnaps(k))||[])) await idbDel('snaps',s.id);
       try{ localStorage.removeItem(k); }catch(e){}
       const rr=(await idbGet('session','recent'))||{id:'recent',list:[]}; rr.list=rr.list.filter(x=>x.key!==k); await idbPut('session',rr); openHistory('recent'); });
   }
@@ -4039,6 +4155,7 @@ async function eraseDeviceData(){
   try{ const db=await Promise.race([AS.dbp, new Promise(r=>setTimeout(r,1500))]); if (db && db.close) db.close(); }catch(e){}   // 開いたままだと消せない
   try{ for (const k of Object.keys(localStorage)) if (k.startsWith('pdfmeasure:')) localStorage.removeItem(k); }catch(e){}
   try{ sessionStorage.clear(); }catch(e){}
+  await tilesErase();
   await new Promise(res=>{ try{ const q=indexedDB.deleteDatabase('pdfmeasure'); q.onsuccess=q.onerror=q.onblocked=()=>res(); }catch(e){ res(); } });
   try{ for (const k of await caches.keys()) if (k.startsWith('zumen-')) await caches.delete(k); }catch(e){}
   try{ for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); }catch(e){}
@@ -4292,7 +4409,8 @@ $('#bScale').onclick=()=>openScale();
 $('#tSnap').onclick=toggleSnap; document.querySelectorAll('#orthoSeg button').forEach(b=>b.onclick=()=>setOrtho(+b.dataset.o));
 try{ S.autoScale = localStorage.getItem('pdfmeasure:auto')!=='0'; }catch(e){}
 try{ const o=+localStorage.getItem('pdfmeasure:ortho'); if (o>=0&&o<=2) setOrtho(o,true); }catch(e){}
-$('#bFit').onclick=fitView; $('#bRotL').onclick=()=>rotateView(-1); $('#bRotR').onclick=()=>rotateView(1); $('#bUndo').onclick=undo; $('#bHelp').onclick=showHelp;
+$('#bFit').onclick=fitView; $('#bRotL').onclick=()=>rotateView(-1); $('#bRotR').onclick=()=>rotateView(1); $('#bUndo').onclick=undo; $('#bSharp').onclick=()=>{ if (hiTask){ cancelJob(hiTask); hiTask=null; } renderHi(true); };
+$('#bHelp').onclick=showHelp;
 $('#bSide').onclick=()=>{ if (isMobile()) app.classList.toggle('side-m'); else { app.classList.toggle('noside'); setTimeout(resize,0); } };
 $('#bCopy').onclick=copyTable;
 $('#bHist').onclick=()=>openHistory(); $('#saveSt').onclick=()=>openHistory();
@@ -4333,7 +4451,7 @@ setTool('dist'); resize(); refreshAll();
 $('#hint').textContent='PDFまたは画像を開いてください（ドラッグ＆ドロップ可）';
 tryResume().catch(e=>{ console.warn('resume',e); busy(''); renderRecentCard(); });
 window.__S=S;
-window.__zk={LOWMEM, PJ, GeoHarvest, extractGeometry, pdfJob, readPdfBytes, crashedBefore, gotoPage, zoomAt, computeWall, wallRow, takeoffWork, wallList, refreshProps, openWallBatch};   // 試験用（test/link.mjs）
+window.__zk={LOWMEM, TL, tget, tkey, tilesReady, tilesNeeded, visTiles, renderHi, tilesDropFile, tilesErase, PJ, GeoHarvest, extractGeometry, pdfJob, readPdfBytes, crashedBefore, gotoPage, zoomAt, computeWall, wallRow, takeoffWork, wallList, refreshProps, openWallBatch};   // 試験用（test/link.mjs）
 })();
 </script>
 </body>
