@@ -383,11 +383,16 @@ table.wb .dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin
 .wbtns{display:flex;gap:6px;padding:0 12px 8px;flex:none}.wbtns .mini{flex:1;height:26px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 table.wb tr.sub td{text-align:right!important} table.wb tr.sub td:nth-child(2){text-align:left!important}
 .mini.pri{background:var(--accent);color:#1a1405;border-color:var(--accent);font-weight:600}
+.laycond{border:1px solid var(--line);border-radius:6px;margin-bottom:6px;font-size:12px;max-height:40vh;overflow:auto} .laycond summary{cursor:pointer;padding:6px 10px;font-weight:600} .laycond summary .mut{font-weight:400;margin-left:6px}
+.lcr{display:grid;grid-template-columns:104px 1fr;gap:2px 8px;padding:5px 10px;border-top:1px solid var(--line)} .lcr h4{margin:4px 0 0;font-size:13px;grid-row:span 2} .lcr h4 small{display:block;font-weight:400;color:var(--muted);font-size:10.5px}
+.lcf{display:flex;flex-wrap:wrap;gap:4px 12px} .lcf label{display:flex;gap:4px;align-items:center;color:var(--muted)} .lcf select,.lcf .inp{height:28px;background:var(--bg);border:1px solid var(--line);border-radius:5px;color:var(--text);width:auto;max-width:190px} .lcf select{-webkit-appearance:none;appearance:none;padding:0 22px 0 8px;background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23999' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 7px center} .lcf .inp{width:88px}
+.lcs{color:var(--muted);font-size:11.5px} .lcs .cutv{color:#ff9d7a;font-family:var(--mono)} .lcb{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 10px;border-top:1px solid var(--line)} .lcb .chk{display:flex;gap:6px;align-items:center}
+table.cutq tr.first td{border-top:2px solid var(--line)} table.cutq td:nth-child(3),table.cutq td:nth-child(4){font-family:var(--mono)}
 .dvsheet{overflow:auto;background:#e9ebee;border-radius:6px;border:1px solid var(--line);padding:8px;flex:1;max-height:72vh}
 .dvsheet svg{width:100%;height:auto;display:block;box-shadow:0 2px 10px #0004;background:#fff}
 .dvsheet.zoomed svg{width:260%;max-width:none}
 @media (max-width:760px){ .dvwrap{grid-template-columns:1fr;grid-template-rows:auto 1fr} .dvidx{display:flex;overflow-x:auto;max-height:none;padding:2px;align-self:start} .dvidx .dvpg{display:none} .dvidx button{width:auto;flex:none} .dvidx button span{display:none}
-  .wbcols{grid-template-columns:1fr} #wqbar{top:auto;bottom:10px;max-width:calc(100% - 12px);flex-wrap:wrap;white-space:normal;justify-content:center} .dvsheet{max-height:none;padding:4px} }
+  .lcr{grid-template-columns:1fr} .lcr h4{grid-row:auto} .wbcols{grid-template-columns:1fr} #wqbar{top:auto;bottom:10px;max-width:calc(100% - 12px);flex-wrap:wrap;white-space:normal;justify-content:center} .dvsheet{max-height:none;padding:4px} }
 
 /* ヘッダー：アイコンの下に名前を表示（わかりやすさ優先） */
 header .tb:not(.pg-arrow){flex-direction:column;justify-content:center;height:44px;min-width:46px;gap:2px;padding:2px 6px}
@@ -432,7 +437,7 @@ header .grp{border-right:1px solid var(--line)} header .grp:last-child{border-ri
   .segb button{min-height:34px;min-width:44px}
   #props .inp,#props select,.wbbar select,.wbbar .inp,table.wb .hin,table.wb select{min-height:38px}
   #wqbar input,#wqbar select,#wqbar button{height:36px}
-  .dvtop .mini,.dvidx button{min-height:40px}
+  .dvtop .mini,.dvidx button{min-height:40px} .lcf select,.lcf .inp,.lcb .mini{min-height:38px}
   .acts .btn{min-height:42px}
   #mUndoGrp .tb,#mActGrp .tb{min-width:44px}
 }
@@ -2161,7 +2166,25 @@ const WALLS=W_ALL.filter(w=>!w.base);                     // 選択肢に出す�
 const WMAP=Object.fromEntries(W_ALL.map(w=>[w.id,w]));
 const WVAR=Object.fromEntries(W_ALL.filter(w=>w.base).map(w=>[w.base+'|'+w.opt,w]));
 const wallOpts = id => Object.keys(W_OPT).filter(o=>WVAR[id+'|'+o]);
-function normWall(W){ if (!W) return W; const v=WMAP[W.sys]; if (v && v.base){ W.sys=v.base; W.opt=v.opt; } if (W.opt && !WVAR[W.sys+'|'+W.opt]) delete W.opt; return W; }
+function normWall(W){ if (!W) return W; const v=WMAP[W.sys]; if (v && v.base){ W.sys=v.base; W.opt=v.opt; } if (W.opt && !WVAR[W.sys+'|'+W.opt]) delete W.opt; return normLay(W); }
+// ---- 割付の条件（LGS の建て方・捨て貼り・上貼りの貼り方・端の寸法）。決まった値だけを残す（読み込んだファイルの値も通る） ----
+const ORI_V=['auto','v','h'], LAY_V=['auto','start','end','center','cboard'];
+const LAY_ENUM={arr:['共通','千鳥'], base:['start','center','gap','end'], layMode:LAY_V, fin:['core','auto'], orientLow:ORI_V, orientUp:ORI_V, layLow:LAY_V, layUp:LAY_V, vLow:['bottom','top'], vUp:['bottom','top'], jtLow:['imo','uma'], jtUp:['imo','uma']};
+const LAY_NUM={lgsFirst:1200, firstLow:3030, firstUp:3030, lenLow:3030, lenUp:3030, gapS:1000, gapE:1000, gapT:500, gapB:500};
+const LAY_OWN=['gapS','gapE','lgsFirst'];   // 壁ごとの値（ほかの壁へ写さない）
+const LAY_KEYS=['pitch','orient','lens','opEdge','opClr',...Object.keys(LAY_ENUM),...Object.keys(LAY_NUM)];
+function normLay(W){
+  for (const k in LAY_ENUM) if (W[k]!==undefined && !LAY_ENUM[k].includes(W[k])) delete W[k];
+  for (const k in LAY_NUM) if (W[k]!==undefined){ const v=Math.round(+W[k]); if (v>0 && v<=LAY_NUM[k]) W[k]=v; else delete W[k]; }
+  return W; }
+const layOf=(W,up)=>{ const t=up?'Up':'Low'; const L={start:W['lay'+t]||'', first:W['first'+t]||0, v:W['v'+t]||'', jt:W['jt'+t]||'', len:W['len'+t]||0}; L.set=!!((L.start&&L.start!=='auto')||L.first||L.v||L.jt); return L; };
+const LGS_BASE={start:'始点から',end:'終点から',center:'中央（柱芯を真ん中）',gap:'中央（柱と柱の間を真ん中）'};
+const LAY_JP={auto:'自動（ロス最小）',start:'始点から',end:'終点から',center:'中央（目地を真ん中）',cboard:'中央（ボードを真ん中）'};
+const sideName=k=>k.replace(/^A/,'A面 ').replace(/^B/,'B面 ').replace('下張','捨て貼り').replace('上張','上貼り');
+const oriJP=o=>o==='v'?'縦張り':'横張り';
+function layTxt(W, up){ const L=layOf(W,up), o=W[up?'orientUp':'orientLow']||W.orient||'auto';
+  return [o==='auto'?'':oriJP(o), LAY_JP[L.start||W.layMode||'auto'], L.first?'1枚目 '+L.first:'', L.v==='bottom'?'下から':L.v==='top'?'上から':'', L.jt==='imo'?'通し目地':L.jt==='uma'?'千鳥目地':'', L.len?'定尺 '+L.len:''].filter(Boolean).join('・'); }
+function lgsTxt(W, c){ return `${c.arr}@${c.pitch}　${LGS_BASE[W.base||'start']}${W.lgsFirst?`・1本目 ${W.lgsFirst}`:''}`; }
 const baseSysId = id => (WMAP[id]&&WMAP[id].base) || id;
 const certUrl = w => YG_PDF + encodeURIComponent(w.cert);
 function studFor(w, H){ const t=HT[w.ht]; if (!t||!t.rows.length) return null; for (const r of t.rows) if (H<=r[0]) return {stud:r[1], runner:r[2], maxH:r[0]}; return {over:true, maxH:t.rows[t.rows.length-1][0]}; }
@@ -2174,7 +2197,7 @@ S.wallDef = (()=>{ try{ return JSON.parse(localStorage.getItem('pdfmeasure:walld
 // 高さの入力チェック（m で入れた 2.7 → 2700、桁違いは拒否）
 function normH(v){ v=+v; if (!(v>0)) return 0; if (v<20){ const mm=Math.round(v*1000); toast(`高さを ${mm}mm として入力しました（mで入力された値を換算）`); return mm; }
   if (v<300 || v>20000){ toast('壁の高さは 300〜20,000mm で入力してください'); return 0; } return Math.round(v); }
-function newWallObj(){ const W={sys:baseSysId(S.wallDef.sys||''), h:S.wallDef.h, base:S.wallDef.base||'start', openings:[]}; if (S.wallDef.layMode && S.wallDef.layMode!=='auto') W.layMode=S.wallDef.layMode; if (S.wallDef.opt && WVAR[W.sys+'|'+S.wallDef.opt]) W.opt=S.wallDef.opt; return W; }
+function newWallObj(){ const W={sys:baseSysId(S.wallDef.sys||''), h:S.wallDef.h, base:S.wallDef.base||'start', openings:[]}; if (S.wallDef.layMode && S.wallDef.layMode!=='auto') W.layMode=S.wallDef.layMode; if (S.wallDef.opt && WVAR[W.sys+'|'+S.wallDef.opt]) W.opt=S.wallDef.opt; const D=S.wallDef.lay; if (D && typeof D==='object') for (const k of LAY_KEYS) if (k!=='base' && k!=='layMode' && !LAY_OWN.includes(k) && D[k]!==undefined) W[k]=JSON.parse(JSON.stringify(D[k])); return normLay(W); }
 function saveWallDef(){ try{ localStorage.setItem('pdfmeasure:walldef', JSON.stringify(S.wallDef)); }catch(e){} if (typeof updateWallBar==='function') updateWallBar(); }
 
 // ---- PDF全ページから開口記号・建具表サイズを抽出 ----
@@ -2221,23 +2244,28 @@ async function scanOpenings(){
 
 // ===== ボード割付エンジン =====
 const LEN_DEFAULT=[1820,2420,2730];
-function boardLens(B, W){ const want=(W.lens&&W.lens.length? W.lens : LEN_DEFAULT).map(Number); const ok=B.lens? want.filter(l=>B.lens.includes(l)) : want; return ok.length? ok : (B.lens||[B.l]); }
-function layoutSeg(g, H, ops, P, out){
-  // P:{orient,bw,bl,shift,fromTop,stagger}
+function boardLens(B, W, one){ if (one && (!B.lens || B.lens.includes(one))) return [one]; const want=(W.lens&&W.lens.length? W.lens : LEN_DEFAULT).map(Number); const ok=B.lens? want.filter(l=>B.lens.includes(l)) : want; return ok.length? ok : (B.lens||[B.l]); }
+function layoutSeg(g, y0, y1, ops, P, out){
+  // P:{orient,bw,bl,shift,fromTop,stagger}　g:{a,b,ca,cb,i}（a,b＝張る範囲、ca,cb＝壁芯での範囲）
   const along = P.orient==='v'? P.bw : P.bl;          // 横方向の1枚幅
   const rowH  = P.orient==='v'? P.bl : P.bw;          // 縦方向の1枚高さ
-  const rows=[]; if (!P.fromTop){ for (let y=0; y<H-1; y+=rowH) rows.push([y,Math.min(y+rowH,H)]); } else { for (let y=H; y>1; y-=rowH) rows.push([Math.max(0,y-rowH),y]); }
+  const mkRows=top=>{ const r=[]; if (!top){ for (let y=y0; y<y1-1; y+=rowH) r.push([y,Math.min(y+rowH,y1)]); } else { for (let y=y1; y>y0+1; y-=rowH) r.push([Math.max(y0,y-rowH),y]); } return r; };
+  const gops=ops.filter(o=>o.e>g.ca && o.s<g.cb);
+  const put=(xa,xb,ya,yb)=>{ if (xb-xa<1) return;
+    let inside=false, area=(xb-xa)*(yb-ya), notch=false;
+    for (const o of gops){ const oy0=+o.sill||0, oy1=oy0+ +o.h; const ix=Math.min(xb,o.e)-Math.max(xa,o.s), iy=Math.min(yb,oy1)-Math.max(ya,oy0);
+      if (ix>0&&iy>0){ if (xa>=o.s-1&&xb<=o.e+1&&ya>=oy0-1&&yb<=oy1+1) inside=true; else { notch=true; area-=ix*iy; } } }
+    if (inside) return;
+    const full=(xb-xa)>=along-1 && (yb-ya)>=rowH-1;
+    out.push({x:xa,y:ya,w:xb-xa,h:yb-ya,area,cut:!full||notch,si:g.i}); };
+  const rows=mkRows(P.fromTop), rows2= P.orient==='v'&&P.stagger? mkRows(!P.fromTop) : null;   // 縦張りの千鳥目地：1列おきに上下を入れ替える
+  if (rows2){ const sh=((P.shift%along)+along)%along; let ci=0;
+    for (let x=g.a+sh-(sh?along:0); x<g.b-1; x+=along, ci++) for (const [ya,yb] of (ci%2? rows2 : rows)) put(Math.max(x,g.a), Math.min(x+along,g.b), ya, yb);
+    return; }
   rows.forEach(([ya,yb],ri)=>{
     let sh = P.shift + ((P.orient==='h' && P.stagger && ri%2)? P.stagger : 0);
     sh=((sh%along)+along)%along;
-    for (let x=g.a+sh-(sh?along:0); x<g.b-1; x+=along){ const xa=Math.max(x,g.a), xb=Math.min(x+along,g.b); if (xb-xa<1) continue;
-      let inside=false, area=(xb-xa)*(yb-ya), notch=false;
-      for (const o of ops){ const oy0=+o.sill||0, oy1=oy0+ +o.h; const ix=Math.min(xb,o.e)-Math.max(xa,o.s), iy=Math.min(yb,oy1)-Math.max(ya,oy0);
-        if (ix>0&&iy>0){ if (xa>=o.s-1&&xb<=o.e+1&&ya>=oy0-1&&yb<=oy1+1) inside=true; else { notch=true; area-=ix*iy; } } }
-      if (inside) continue;
-      const full=(xb-xa)>=along-1 && (yb-ya)>=rowH-1;
-      out.push({x:xa,y:ya,w:xb-xa,h:yb-ya,area,cut:!full||notch});
-    }
+    for (let x=g.a+sh-(sh?along:0); x<g.b-1; x+=along) put(Math.max(x,g.a), Math.min(x+along,g.b), ya, yb);
   });
 }
 function ffd(items, cap){ const bins=[]; for (const it of items.sort((a,b)=>b-a)){ const v=Math.min(it,cap); let placed=false; for (let i=0;i<bins.length;i++) if (bins[i]>=v-0.5){ bins[i]-=v; placed=true; break; } if (!placed) bins.push(cap-v); } return bins.length; }
@@ -2248,53 +2276,130 @@ function estimateSheets(list, orient, bw, bl){
   return ffd(A,bl) + ffd(Bw,bw) + Math.ceil(restArea/(bw*bl)/0.8 - 1e-9);
 }
 function jointsX(list, segs){ const xs=new Set(); for (const p of list) for (const x of [p.x,p.x+p.w]) if (!segs.some(g=>Math.abs(x-g.a)<1||Math.abs(x-g.b)<1)) xs.add(Math.round(x)); return [...xs]; }
-function jointsY(list, H){ const ys=new Set(); for (const p of list) for (const y of [p.y,p.y+p.h]) if (y>1&&y<H-1) ys.add(Math.round(y)); return [...ys]; }
+function jointsY(list, y0, y1){ const ys=new Set(); for (const p of list) for (const y of [p.y,p.y+p.h]) if (y>y0+1&&y<y1-1) ys.add(Math.round(y)); return [...ys]; }
 const tooClose=(a,b,d=100)=>a.some(x=>b.some(y=>Math.abs(x-y)<d));
-function optimizeLayer({segs,H,ops,B,W,sideStuds,lower,mustOnStud,pref}){
+function optimizeLayer({segs,y0,y1,ops,B,W,lay,sideStuds,lower,mustOnStud,pref,upV}){
   const orients = pref==='v'||pref==='h'? [pref] : ['v','h'];
-  const lens=boardLens(B,W); let best=null; const bw=B.w;
+  const TOL= lay.set? 10 : 3;   // 貼り方を選んだ層：目地がスタッド（幅45）の芯から10mm以内ならスタッドの上とみなす（@303 と 910 の端数）
+  const lens=boardLens(B,W,lay.len); let best=null; const bw=B.w;
+  const mode=lay.start||W.layMode||'auto', pick= lay.first || (lay.start && lay.start!=='auto');
   for (const orient of orients) for (const bl of lens){
     const period = orient==='v'? bw : bl;
     const segChoice=[]; let list=[];
     for (const g of segs){
       // 目地候補：下張はスタッド位置、上張は50mm刻み
-      let shifts; const along0 = orient==='v'? bw : bl;
-      const mode=W.layMode||'auto';
+      let shifts; const along0 = orient==='v'? bw : bl, Lg=g.b-g.a, md=v=>((v%along0)+along0)%along0;
+      const onStuds=()=>[...new Set(sideStuds.filter(x=>x>=g.a-1&&x<=g.b+1).map(x=>Math.round(((x-g.a)%period+period)%period)))];
       // 片押し・中央振分け：ボードの目地位置を基準端から決める（上張は下張と重ならないよう半枚ずらしも候補）
-      const forced = mode==='start'? 0 : mode==='end'? ((g.b-g.a)%along0) : mode==='center'? (((g.b-g.a)/2)%along0) : null;
-      if (forced!=null){ shifts=[Math.round(forced)]; if (!mustOnStud){ shifts.push(Math.round((forced+along0/2)%along0)); } }
-      else if (mustOnStud){ shifts=[...new Set(sideStuds.filter(x=>x>=g.a-1&&x<=g.b+1).map(x=>Math.round(((x-g.a)%period+period)%period)))]; if (!shifts.length) shifts=[0]; }
+      const forced = mode==='start'? 0 : mode==='end'? (Lg%along0) : mode==='center'? ((Lg/2)%along0) : mode==='cboard'? md(Lg/2-along0/2) : null;
+      if (pick){   // この層の貼り方を選んだとき：そのとおりに張る。目地がスタッドの外・下張と重なるときだけ、1枚目を切ってずらす
+        const f=Math.min(lay.first, along0);
+        const ex= f&&mode==='end'? md(Lg-f) : f&&(mode==='start'||mode==='auto')? md(f) : Math.round(forced||0);
+        shifts=[{s:ex}];
+        if (!f){ if (mustOnStud) for (const v of onStuds()) if (Math.abs(v-ex)>1) shifts.push({s:v,alt:true}); if (!mustOnStud) shifts.push({s:Math.round(md(ex+along0/2)),alt:true}); }
+      }
+      else if (forced!=null){ shifts=[Math.round(forced)]; if (!mustOnStud){ shifts.push(Math.round((forced+along0/2)%along0)); } }
+      else if (mustOnStud){ shifts=onStuds(); if (!shifts.length) shifts=[0]; }
       else { shifts=[]; for (let s=0; s<period; s+=50) shifts.push(s); }
       let segBest=null;
-      for (const shift of shifts) for (const fromTop of [false,true]) for (const stagger of (orient==='h'? [0, mustOnStud? nearestStudStagger(bl, sideStuds, g) : Math.round(bl/2/50)*50] : [0])){
+      const tops= lay.v==='bottom'? [false] : lay.v==='top'? [true] : [false,true];
+      const half=Math.round(bl/2/50)*50, near=mustOnStud? nearestStudStagger(bl, sideStuds, g) : half;
+      const stags= orient==='v'? (lay.jt==='uma'? [1] : [0]) : lay.jt==='imo'? [0] : lay.jt==='uma'? [near>0? near : half] : [0, near];
+      for (const sh of shifts) for (const fromTop of tops) for (const stagger of stags){
+        const shift= typeof sh==='number'? sh : sh.s, alt= typeof sh!=='number' && sh.alt;
         if (orient==='h' && stagger && mustOnStud && stagger<0) continue;
-        const P={orient,bw,bl,shift,fromTop,stagger}; const L=[]; layoutSeg(g,H,ops,P,L);
-        if (mustOnStud && orient==='h' && stagger){ // 千鳥目地もスタッド上
-          const jx=jointsX(L,[g]); if (!jx.every(x=>sideStuds.some(s=>Math.abs(s-x)<3))) continue; }
-        let pen=0, off=0;
-        if (mustOnStud){ off=jointsX(L,[g]).filter(x=>!sideStuds.some(s=>Math.abs(s-x)<3)).length; pen+=off*1e7; }   // 下張の縦目地はスタッド上
-        if (lower){ const lw=lower.list.filter(p=>p.x>=g.a-1&&p.x+p.w<=g.b+1);
-          if (tooClose(jointsX(L,[g]), jointsX(lw,[g]))) pen+=1e9;     // 上張と下張の縦目地は100mm以上ずらす
-          if (tooClose(jointsY(L,H), jointsY(lw,H))) pen+=1e8; }        // 横目地も重ねない
+        const P={orient,bw,bl,shift,fromTop,stagger}; const L=[]; layoutSeg(g,y0,y1,ops,P,L);
+        const gx=jointsX(L,[g]);
+        if (mustOnStud && orient==='h' && stagger && !lay.jt){ // 千鳥目地もスタッド上
+          if (!gx.every(x=>sideStuds.some(s=>Math.abs(s-x)<TOL))) continue; }
+        let pen=0, off=0, cy=false;
+        if (mustOnStud){ off=gx.filter(x=>!sideStuds.some(s=>Math.abs(s-x)<TOL)).length; pen+=off*1e7; }   // 下張の縦目地はスタッド上
+        if (lower){ const lw=lower.list.filter(p=>p.si===g.i);
+          if (tooClose(gx, jointsX(lw,[g]))) pen+=1e9;     // 上張と下張の縦目地は100mm以上ずらす
+          if (tooClose(jointsY(L,y0,y1), jointsY(lw,y0,y1))){ pen+=1e8; cy=true; } }        // 横目地も重ねない
         // 開口キワ：開口の縦の縁・上下の縁から clr 以内に目地を作らない（角からのひび割れ防止。L型に切り欠く）
         let edge=0; if (W.opEdge!==false && ops.length){ const clr=+W.opClr||100;
-          const gx=jointsX(L,[g]); for (const o of ops){ if (o.e<g.a||o.s>g.b) continue; const top=(+o.sill||0)+ +o.h, sill=+o.sill||0;
+          for (const o of ops){ if (o.e<g.a||o.s>g.b) continue; const top=(+o.sill||0)+ +o.h, sill=+o.sill||0;
             for (const x of gx) if (Math.abs(x-o.s)<clr || Math.abs(x-o.e)<clr) edge++;
-            for (const p of L){ if (p.x+p.w<o.s-clr || p.x>o.e+clr) continue; for (const y of [p.y, p.y+p.h]) if (y>1 && y<H-1 && ((top<H-1 && Math.abs(y-top)<clr) || (sill>1 && Math.abs(y-sill)<clr))) { edge++; break; } } } }
-        pen+=edge*3e6;
+            for (const p of L){ if (p.x+p.w<o.s-clr || p.x>o.e+clr) continue; for (const y of [p.y, p.y+p.h]) if (y>y0+1 && y<y1-1 && ((top<y1-1 && Math.abs(y-top)<clr) || (sill>y0+1 && Math.abs(y-sill)<clr))) { edge++; break; } } } }
+        pen+=edge*(pick? 1e4 : 3e6);
+        if (alt) pen+=9e6+(shift? along0-shift : 0)*10;
+        if (mustOnStud && upV && !lay.v && fromTop===(upV==='top')) pen+=500;   // 上貼りの上下が決まっているときは、捨て貼りは逆から
         const sheets=estimateSheets(L,orient,bw,bl);
         const sc=pen + sheets*bw*bl + L.length*1000;
-        if (!segBest||sc<segBest.sc) segBest={sc,P,L,pen,off,edge};
+        if (!segBest||sc<segBest.sc) segBest={sc,P,L,pen,off,edge,alt,cy};
       }
-      segChoice.push(segBest.P); list=list.concat(segBest.L); list.off=(list.off||0)+segBest.off; list.edge=(list.edge||0)+(segBest.edge||0);
-      if (segBest.pen>=1e9) list.conflict=true;
+      segChoice.push(segBest.P); const o0=list; list=list.concat(segBest.L); list.off=(o0.off||0)+segBest.off; list.edge=(o0.edge||0)+(segBest.edge||0);
+      list.alt=o0.alt||!!segBest.alt; list.ycf=o0.ycf||segBest.cy; list.conflict=o0.conflict||segBest.pen>=1e9;
     }
     const sheets=estimateSheets(list,orient,bw,bl); const used=list.reduce((a,p)=>a+p.area,0);
     const loss=sheets? 1-used/(sheets*bw*bl) : 0;
     const sc=sheets*bw*bl + list.length*1000 + (list.conflict?1e12:0) + (list.off||0)*1e10;
-    if (!best||sc<best.sc) best={sc,list,orient,bl,bw,sheets,loss,used,P:segChoice,conflict:!!list.conflict,offStud:list.off||0,edge:list.edge||0};
+    if (!best||sc<best.sc) best={sc,list,orient,bl,bw,sheets,loss,used,P:segChoice,conflict:!!list.conflict,offStud:list.off||0,edge:list.edge||0,alt:!!list.alt,ycf:!!list.ycf};
   }
   return best;
+}
+// ---- キワのカット寸法：張る1枚を、開口で分かれる所は分け、切り欠きを付けて並べる ----
+function cutParts(p, ops, y0, y1){
+  let parts=[{x:p.x,y:p.y,w:p.w,h:p.h,n:[]}]; const notch=[];
+  for (const o of ops){ const ob=+o.sill||0, ot=ob+ +o.h; const nx=[];
+    for (const q of parts){ const a=Math.max(q.x,o.s), b=Math.min(q.x+q.w,o.e), c=Math.max(q.y,ob), d=Math.min(q.y+q.h,ot);
+      if (b-a<=0.5||d-c<=0.5){ nx.push(q); continue; }
+      const fw=a<=q.x+1&&b>=q.x+q.w-1, fh=c<=q.y+1&&d>=q.y+q.h-1;
+      if (fw||fh){ if (fw&&fh) continue; const cand= fw? [{...q,h:c-q.y,n:[]},{...q,y:d,h:q.y+q.h-d,n:[]}] : [{...q,w:a-q.x,n:[]},{...q,x:b,w:q.x+q.w-b,n:[]}]; for (const z of cand) if (z.w>1&&z.h>1) nx.push(z); }
+      else { nx.push(q); notch.push({o,ob,ot}); } }
+    parts=nx; }
+  for (const q of parts) for (const {o,ob,ot} of notch){ const a=Math.max(q.x,o.s), b=Math.min(q.x+q.w,o.e), c=Math.max(q.y,ob), d=Math.min(q.y+q.h,ot); if (b-a>0.5&&d-c>0.5) q.n.push({x:a,y:c,w:b-a,h:d-c,mark:o.mark||'開口'}); }
+  return parts;
+}
+const _cutCache=new WeakMap();
+function cutList(c, key){
+  const L=c.boards[key]; const had=_cutCache.get(L); if (had) return had;
+  const along=L.orient==='v'? L.bw : L.bl, rowH=L.orient==='v'? L.bl : L.bw, R=Math.round, parts=[], rows=new Map(); const i0=L.fs[0]&&L.fs[0].i, i1=L.fs.length&&L.fs[L.fs.length-1].i;
+  for (const p of L.list){ const g=L.fs.find(f=>f.i===p.si); if (!g) continue; const ops=c.ops.filter(o=>o.e>g.ca&&o.s<g.cb);
+    for (const q of cutParts(p, ops, L.y0, L.y1)){
+      const wc=q.w<along-1, hc=q.h<rowH-1, S=Math.abs(q.x-g.a)<1.5, E=Math.abs(q.x+q.w-g.b)<1.5, T=Math.abs(q.y+q.h-L.y1)<1.5, Bt=Math.abs(q.y-L.y0)<1.5, tags=[];
+      const near=f=>ops.find(f); const yo=o=>Math.min(q.y+q.h,(+o.sill||0)+ +o.h)-Math.max(q.y,+o.sill||0)>1, xo=o=>Math.min(q.x+q.w,o.e)-Math.max(q.x,o.s)>1;
+      if (wc){ if (S) tags.push(p.si===i0?'始点キワ':'折点'); if (E) tags.push(p.si===i1?'終点キワ':'折点');
+        const o=near(o=>yo(o)&&(Math.abs(q.x+q.w-o.s)<1.5||Math.abs(q.x-o.e)<1.5)); if (o) tags.push((o.mark||'開口')+' 脇'); else if (!S&&!E) tags.push('中間'); }
+      if (hc){ if (T&&Bt) tags.push('高さ'); else if (T) tags.push('上端'); else if (Bt) tags.push('下端'); const ou=near(o=>xo(o)&&Math.abs(q.y-((+o.sill||0)+ +o.h))<1.5), od=near(o=>xo(o)&&Math.abs(q.y+q.h-(+o.sill||0))<1.5); if (ou) tags.push((ou.mark||'開口')+' 上'); if (od) tags.push((od.mark||'開口')+' 下'); }
+      const nt=q.n.map(n=>{ const l=n.x<=q.x+1, r=n.x+n.w>=q.x+q.w-1, b=n.y<=q.y+1, t=n.y+n.h>=q.y+q.h-1; const sz=`${R(n.w)}×${R(n.h)}`, ls=R(n.x-q.x), bs=R(n.y-q.y);
+        if ((l||r)&&(t||b)) return `L欠き ${sz}（${l?'始点側':'終点側'}の${t?'上':'下'}）`;
+        if (l||r) return `コの字欠き ${sz}（${l?'始点側':'終点側'}・下から${bs}）`;
+        if (t||b) return `コの字欠き ${sz}（${t?'上':'下'}・始点側から${ls}）`;
+        return `くり抜き ${sz}（始点側から${ls}・下から${bs}）`; });
+      if (q.n.length) tags.push([...new Set(q.n.map(n=>n.mark))].join('・')+' まわり');
+      const cut=wc||hc||!!q.n.length; const pt={...q,si:p.si,cut,wc,hc,S,E,T,B:Bt}; parts.push(pt);
+      if (cut){ const where=[...new Set(tags)].join('・'), note=nt.join('、'), k=[where,R(q.w),R(q.h),note].join('|'); const o=rows.get(k)||{where,w:R(q.w),h:R(q.h),note,n:0,end:/キワ/.test(where)}; o.n++; rows.set(k,o); }
+    } }
+  const out={parts, rows:[...rows.values()].sort((a,b)=>(b.end-a.end)||a.where.localeCompare(b.where,'ja')||b.w-a.w||b.h-a.h)}; _cutCache.set(L,out); return out;
+}
+// 端（始点・終点・上端・下端）のカット寸法を1行に
+function edgeTxt(c, key){ const {parts}=cutList(c,key); const u=f=>[...new Set(parts.filter(f[0]).map(f[1]))].sort((a,b)=>b-a); const L=c.boards[key], i0=L.fs.length?L.fs[0].i:0, i1=L.fs.length?L.fs[L.fs.length-1].i:0; const R=Math.round;
+  const one=(n,f)=>{ const v=u(f); return v.length? `${n} ${v.slice(0,3).join('/')}${v.length>3?'…':''}` : ''; };
+  return [one('始点',[p=>p.S&&p.si===i0&&p.wc,p=>R(p.w)]), one('終点',[p=>p.E&&p.si===i1&&p.wc,p=>R(p.w)]), one('高さ',[p=>p.T&&p.B&&p.hc,p=>R(p.h)]), one('上端',[p=>p.T&&!p.B&&p.hc,p=>R(p.h)]), one('下端',[p=>p.B&&!p.T&&p.hc,p=>R(p.h)])].filter(Boolean).join('・')||'切り物なし'; }
+// 端の寸法：取り合う壁の厚みから、A面・B面それぞれの「張る範囲」を出す（＋は短く、−は長く。mm）
+function autoTrim(m){
+  const k=mmPer(m.page); if (!k) return null; const P=pathPts(m), M=m.pts, n=M.length; if (P.length<2||n<2) return null;
+  const T0=q=>{ const s=wallSys(q); return s&&s.t||100; }, A=Array.from({length:n-1},()=>({a:0,b:0})), B=Array.from({length:n-1},()=>({a:0,b:0})), clamp=v=>Math.max(-300,Math.min(300,v)); let found=0;
+  // 自分の折れ点：内側は短く、外側は長く
+  for (let i=1;i<n-1;i++){ if (m.arcs&&(m.arcs[i-1]||m.arcs[i])) continue; const d1={x:M[i].x-M[i-1].x,y:M[i].y-M[i-1].y}, d2_={x:M[i+1].x-M[i].x,y:M[i+1].y-M[i].y}, l1=Math.hypot(d1.x,d1.y), l2=Math.hypot(d2_.x,d2_.y); if (!l1||!l2) continue;
+    const cr=(d1.x*d2_.y-d1.y*d2_.x)/(l1*l2), dt=(d1.x*d2_.x+d1.y*d2_.y)/(l1*l2), th=Math.abs(Math.atan2(cr,dt)); if (th<0.09||th>2.8) continue; const e=clamp(T0(m)/2*Math.tan(th/2))*(cr<0?1:-1);
+    A[i-1].b+=e; A[i].a+=e; B[i-1].b-=e; B[i].a-=e; found++; }
+  const others=lineMeasAll().filter(q=>q!==m && q.id!==m.id && q.page===m.page && wallOk(q));
+  const endAt=(p,u,fwd)=>{ // u＝端から壁の中へ向く単位ベクトル
+    let ra=null, rb=null; for (const q of others){ const t=T0(q)/2, Q=pathPts(q);
+      for (let j=1;j<Q.length;j++){ const a=Q[j-1], b=Q[j], L=d2(a,b); if (!L) continue; const vx=(b.x-a.x)/L, vy=(b.y-a.y)/L, sn=Math.abs(u.x*vy-u.y*vx); if (sn<0.5) continue;
+        const den=u.x*vy-u.y*vx, wx=a.x-p.x, wy=a.y-p.y; const s=(wx*vy-wy*vx)/den*k, r=(wx*u.y-wy*u.x)/den*k, Lm=L*k;   // s＝壁の端から相手の芯まで、r＝相手の上の位置
+        if (Math.abs(s)>t+40 || r<-(t+60) || r>Lm+t+60) continue;
+        const endS=j===1 && r<t+60, endE=j===Q.length-1 && r>Lm-t-60; let va=s+t/sn, vb=va;
+        if (endS!==endE){ const sg=endS?1:-1, dot=(vx*fwd.y-vy*fwd.x)*sg; if (dot>0) vb=s-t/sn; else va=s-t/sn; }   // 出隅・入隅（L形）：相手の伸びる側が内側
+        ra= ra==null? va : Math.max(ra,va); rb= rb==null? vb : Math.max(rb,vb); } }
+    if (ra==null) return [0,0]; found++; return [clamp(ra),clamp(rb)]; };
+  const uv=(a,b)=>{ const L=d2(a,b)||1; return {x:(b.x-a.x)/L,y:(b.y-a.y)/L}; };
+  const f0=uv(P[0],P[1]), f1=uv(P[P.length-2],P[P.length-1]); const s=endAt(P[0],f0,f0), e=endAt(P[P.length-1],{x:-f1.x,y:-f1.y},f1);
+  A[0].a+=s[0]; B[0].a+=s[1]; A[n-2].b+=e[0]; B[n-2].b+=e[1];
+  return {A,B,found};
 }
 function nearestStudStagger(bl, studs, g){ // 横張り千鳥目地：bl/2 に最も近いスタッド間隔
   const rel=studs.filter(x=>x>=g.a&&x<=g.b).map(x=>x-g.a); let best=-1, d=1e9; for (const r of rel){ const v=Math.abs(r-bl/2); if (r>0&&r<bl&&v<d){ d=v; best=Math.round(r); } } return best; }
@@ -2344,10 +2449,11 @@ function wallSys(m){ if (!m.wall) return null; normWall(m.wall); const W=m.wall;
 const WRULE=(()=>{ try{ return Object.assign({minDed:0.5}, JSON.parse(localStorage.getItem('pdfmeasure:wallrule')||'{}')); }catch(e){ return {minDed:0.5}; } })();
 function setWallRule(v){ WRULE.minDed=v; try{ localStorage.setItem('pdfmeasure:wallrule', JSON.stringify(WRULE)); }catch(e){} refreshList(); drawOv(); if (S.sel) refreshProps(); }
 function computeWall(m){
-  const key=JSON.stringify([m.pts,m.wall,m.arcs,mmPer(m.page),WRULE.minDed]); const ch=_cwCache.get(m); if (ch&&ch.key===key) return ch.val;
-  const val=computeWall0(m); _cwCache.set(m,{key,val}); return val;
+  const tr= m.wall && m.wall.fin==='auto'? autoTrim(m) : null;
+  const key=JSON.stringify([m.pts,m.wall,m.arcs,mmPer(m.page),WRULE.minDed,tr]); const ch=_cwCache.get(m); if (ch&&ch.key===key) return ch.val;
+  const val=computeWall0(m, tr); _cwCache.set(m,{key,val}); return val;
 }
-function computeWall0(m){
+function computeWall0(m, tr){
   const k=mmPer(m.page) ?? 1; const W=m.wall; const sys=wallSys(m);
   const segs=[]; let acc=0; for (let i=1;i<m.pts.length;i++){ const L=segLen(m,i-1)*k; segs.push({a:acc,b:acc+L,L}); acc+=L; }
   const Ltot=acc, H=+W.h||0;
@@ -2360,19 +2466,24 @@ function computeWall0(m){
   const opArea=ops.reduce((a,o)=>a+(o.small? 0 : o.area),0); const nSmall=ops.filter(o=>o.small).length;
   const area=Ltot*Hb, net=Math.max(0,area-opArea);
   const pitch=(+W.pitch>=100 && +W.pitch<=1200)? +W.pitch : (sys? sys.pitch : 455);
-  const arr=sys? sys.arr : '共通';
+  const arr= W.arr && (!sys || sys.arr==='共通' || sys.arr==='千鳥')? W.arr : sys? sys.arr : '共通';
+  // 端の寸法：A面・B面・LGS の範囲（標準は壁芯から壁芯）
+  const nS=segs.length, gS=+W.gapS||0, gE=+W.gapE||0, face=(sd)=>segs.map((g,i)=>{ const t=tr&&tr[sd]? tr[sd][i] : {a:0,b:0}; return {a:g.a+t.a+(i===0?gS:0), b:g.b-t.b-(i===nS-1?gE:0), ca:g.a, cb:g.b, i}; }).filter(g=>g.b-g.a>1);
+  const fA=face('A'), fB=face('B');
+  const lg=segs.map((g,i)=>{ const t=tr? [(tr.A[i].a+tr.B[i].a)/2, (tr.A[i].b+tr.B[i].b)/2] : [0,0]; const a=g.a+(i===0? t[0]+gS : 0), b=g.b-(i===nS-1? t[1]+gE : 0); return b-a>1? {a,b,L:g.L} : g; });
   // studs
   const studs=[];
   const add=(x,side,kind,seg)=>{ for (const s of studs) if (Math.abs(s.x-x)<15 && (s.side===side||s.side==='AB'||side==='AB')){ if (kind!=='reg'){ s.kind=kind; s.side='AB'; } return; } studs.push({x,side,kind,seg}); };
-  if (arr!=='なし' && pitch>0) segs.forEach((g,gi)=>{
-    const pos=[]; const base=W.base||'start';
+  if (arr!=='なし' && pitch>0) lg.forEach((g,gi)=>{
+    const pos=[]; const base=W.base||'start', f1=W.lgsFirst||0;
     if (base==='center'){ const c=(g.a+g.b)/2; pos.push(c); for (let i=1; c+i*pitch<g.b-1 || c-i*pitch>g.a+1; i++){ if (c+i*pitch<g.b-1) pos.push(c+i*pitch); if (c-i*pitch>g.a+1) pos.push(c-i*pitch); } }
-    else if (base==='end'){ for (let x=g.b; x>g.a+1; x-=pitch) pos.push(x); }
-    else { for (let x=g.a; x<g.b-1; x+=pitch) pos.push(x); }
+    else if (base==='gap'){ const c=(g.a+g.b)/2; for (let i=0; c+(i+0.5)*pitch<g.b-1 || c-(i+0.5)*pitch>g.a+1; i++){ if (c+(i+0.5)*pitch<g.b-1) pos.push(c+(i+0.5)*pitch); if (c-(i+0.5)*pitch>g.a+1) pos.push(c-(i+0.5)*pitch); } }
+    else if (base==='end'){ for (let x=g.b-f1; x>g.a+1; x-=pitch) pos.push(x); }
+    else { for (let x=g.a+f1; x<g.b-1; x+=pitch) pos.push(x); }
     pos.sort((a,b)=>a-b);
-    const ref = base==='end'? g.b : base==='center'? (g.a+g.b)/2 : g.a;
+    const ref = base==='end'? g.b-f1 : base==='center'? (g.a+g.b)/2 : base==='gap'? (g.a+g.b)/2-pitch/2 : g.a+f1;
     for (const x of pos){ const i=Math.round(Math.abs(x-ref)/pitch); const side = arr==='千鳥'? (i%2===0?'A':'B') : arr==='片側'? 'A' : 'AB'; add(x, side, 'reg', gi); }
-    add(g.a,'AB', gi>0?'corner':'end', gi); add(g.b,'AB', gi<segs.length-1?'corner':'end', gi);
+    add(g.a,'AB', gi>0?'corner':'end', gi); add(g.b,'AB', gi<nS-1?'corner':'end', gi);
   });
   // openings: cut regular studs, add jambs
   for (const s of studs){ s.parts=[[0,H]]; for (const o of ops){ if (s.x>o.s+5 && s.x<o.e-5){ const top=(+o.sill||0)+ +o.h; const parts=[]; if ((+o.sill||0)>0) parts.push([0,+o.sill]); if (top<H) parts.push([top,H]); s.parts=parts; s.kind = s.kind==='reg'? 'cut' : s.kind; } } }
@@ -2393,13 +2504,14 @@ function computeWall0(m){
         const key=sd+(isUp?'上張':(nL>2? `下張${li+1}`:'下張'));
         const sideStuds=studs.filter(s=>s.side==='AB'||s.side===sd).map(s=>s.x);
         const pref = isUp? (W.orientUp||W.orient||'auto') : (W.orientLow||W.orient||'auto');
-        const res=optimizeLayer({segs,H:Hb,ops,B,W,sideStuds,lower:lowerRes, mustOnStud: li===0, pref});
-        boards[key]={...res, board:B}; layers.push(key); lowerRes=res;
+        const fs=sd==='B'? fB : fA, y0=Math.min(+W.gapB||0, Hb/2), y1=Math.max(y0+1, Hb-(+W.gapT||0));
+        const res=optimizeLayer({segs:fs,y0,y1,ops,B,W,lay:layOf(W,isUp),sideStuds,lower:lowerRes, mustOnStud: li===0, pref, upV: W.vUp||''});
+        boards[key]={...res, board:B, fs, y0, y1}; layers.push(key); lowerRes=res;
       }
     }
   }
   const st=sys? studFor(sys,H) : null;
-  return {segs, Ltot, H, Hb, ops, opArea, nSmall, area, net, pitch, arr, studs, sway, boards, layers, sys, st, wallRef:{opClr:W.opClr}};
+  return {segs, Ltot, H, Hb, ops, opArea, nSmall, area, net, pitch, arr, studs, sway, boards, layers, sys, st, trim:tr, wallRef:{opClr:W.opClr}};
 }
 function wallSummary(m){
   const c=computeWall(m); const f=v=>(v/1e6).toLocaleString('ja-JP',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -2455,7 +2567,8 @@ function refreshProps(){
       ${sys?`<div><span>ボード面積（全層・${c.layers.length}層）</span><b>${fmtMm2(layersArea)}</b></div>`:''}
       <div><span>スタッド</span><b>${c.studs.length} 本${c.st&&c.st.stud?`（${c.st.stud}）`:''}</b></div>
     </div>
-    <div style="display:flex;gap:6px"><button class="btn pri" style="flex:1" id="pElev">割付図（立面）</button><button class="btn" style="flex:1" id="pDev">展開図①②③…</button></div>`;
+    <div style="display:flex;gap:6px"><button class="btn pri" style="flex:1" id="pElev">割付図（立面）</button><button class="btn" style="flex:1" id="pDev">展開図①②③…</button></div>
+    ${sys&&c.layers.length?'<div class="pmini">LGS・捨て貼り・上貼りの建て方・貼り方とキワの寸法は、割付図・展開図の「割付の条件」で選べます。</div>':''}`;
   }
   const ops=(W.openings||[]);
   el.innerHTML=runBreakdownHtml(m)+`
@@ -2468,13 +2581,13 @@ function refreshProps(){
    ${m.wall? sysCard(sys,H,W) : '<div class="note">高さを入力すると、この線分を壁として面積計算・割付できます。</div>'}
    ${m.wall?`
    <div class="pg"><label>スタッド間隔</label><input class="inp" id="pPitch" type="number" step="1" value="${W.pitch??''}" placeholder="${sys?sys.pitch:455}"><span class="u">mm</span></div>
-   <div class="pg"><label>割付基準</label><select id="pBase"><option value="start">始点から</option><option value="center">中央振分け</option><option value="end">終点から</option></select></div>
+   <div class="pg"><label>割付基準</label><select id="pBase">${Object.entries(LGS_BASE).map(([v,t])=>`<option value="${v}">${t}</option>`).join('')}</select></div>
    ${sys && sys.arr!=='なし'?`<div class="pg"><label>上張ボード</label><select id="pUpB"><option value="">認定仕様（${esc(BOARDS[sys.up].n)}）</option>${Object.entries(BOARDS).map(([k,b])=>`<option value="${k}">${esc(b.n)}（${b.w}×${b.l}）</option>`).join('')}</select></div>
    <div class="pg"><label>下張ボード</label><select id="pLowB"><option value="">認定仕様（${esc(BOARDS[sys.low].n)}）</option>${Object.entries(BOARDS).map(([k,b])=>`<option value="${k}">${esc(b.n)}（${b.w}×${b.l}）</option>`).join('')}</select></div>`:''}
-   ${sys && sys.arr!=='なし'?`<div class="pg"><label>下張の方向</label><div class="segb" data-ori="orientLow"><button data-v="auto">自動</button><button data-v="v">縦張り</button><button data-v="h">横張り</button></div></div>
-   ${sys.layersPerSide>1?`<div class="pg"><label>上張の方向</label><div class="segb" data-ori="orientUp"><button data-v="auto">自動</button><button data-v="v">縦張り</button><button data-v="h">横張り</button></div></div>`:''}
+   ${sys && sys.arr!=='なし'?`<div class="pg"><label>捨て貼りの向き</label><div class="segb" data-ori="orientLow"><button data-v="auto">自動</button><button data-v="v">縦張り</button><button data-v="h">横張り</button></div></div>
+   ${sys.layersPerSide>1?`<div class="pg"><label>上貼りの向き</label><div class="segb" data-ori="orientUp"><button data-v="auto">自動</button><button data-v="v">縦張り</button><button data-v="h">横張り</button></div></div>`:''}
    <div class="pg"><label>図面表記</label><label class="chk" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pPlanDet" ${S.planDetail?'checked':''}>平詳表記（拡大時にスタッド・ボード・ピッチ寸法を描く）</label></div>
-   <div class="pg"><label>ボード割付</label><select id="pLay"><option value="auto">自動（ロス最小）</option><option value="start">片押し（始点から）</option><option value="end">片押し（終点から）</option><option value="center">中央振分け</option></select></div>
+   ${sys && sys.arr!=='なし'?`<div class="pg"><label>ボード割付</label><select id="pLay"><option value="__mix">捨て貼り・上貼りで別々</option>${Object.entries(LAY_JP).map(([v,t])=>`<option value="${v}">${t}</option>`).join('')}</select></div>`:''}
    ${ops.length?`<div class="pg"><label>開口キワ</label><label class="chk" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pOpEdge" ${W.opEdge!==false?'checked':''}>縁から<input class="inp" id="pOpClr" type="number" min="0" step="10" value="${+W.opClr||100}" style="width:64px">mm以内に目地を作らない</label></div>`:''}
    <div class="pg"><label>定尺候補</label><div class="lens">${[1820,2420,2730,3030].map(l=>`<label><input type="checkbox" data-len="${l}" ${(W.lens&&W.lens.length? W.lens : LEN_DEFAULT).includes(l)?'checked':''}>${l}</label>`).join('')}</div></div>
    ${layoutTable(m)}`:''}
@@ -2485,7 +2598,7 @@ function refreshProps(){
   const upd=(fn)=>{ pushUndo(); if (!m.wall) m.wall=newWallObj(); fn(m.wall); save(); refreshListValues(); drawOv(); clearTimeout(propsTimer); propsTimer=setTimeout(refreshProps,10); };
   $('#pH').onchange=e=>{ let v=parseFloat(e.target.value); if (!(v>0)) { if (m.wall){ upd(w=>w.h=0);} return; } v=normH(v); if (!v){ e.target.value=W.h||''; return; } upd(w=>{ w.h=v; }); S.wallDef.h=v; saveWallDef(); };
   if ($('#pSplit')) $('#pSplit').onclick=()=>splitRun(m);
-  $('#pSys').onchange=e=>{ upd(w=>{ w.sys=e.target.value; w.pitch=''; w.upShift=''; if (w.opt && !WVAR[w.sys+'|'+w.opt]) delete w.opt; }); S.wallDef.sys=e.target.value; saveWallDef(); };
+  $('#pSys').onchange=e=>{ upd(w=>{ w.sys=e.target.value; w.pitch=''; w.upShift=''; delete w.arr; if (w.opt && !WVAR[w.sys+'|'+w.opt]) delete w.opt; }); S.wallDef.sys=e.target.value; saveWallDef(); };
   if ($('#pOpt')) $('#pOpt').onchange=e=>{ upd(w=>{ if (e.target.value) w.opt=e.target.value; else delete w.opt; }); S.wallDef.opt=e.target.value||''; saveWallDef(); };
   if (!m.wall) return;
   el.querySelectorAll('#pCeilSeg button').forEach(b=>b.onclick=()=>{
@@ -2493,8 +2606,8 @@ function refreshProps(){
     const d=+W.ceil||+S.wallDef.ceil||Math.max(0,(+W.h||0)-300)||2400;
     upd(w=>{ w.ceil=d; }); });
   if ($('#pCeil')) $('#pCeil').onchange=e=>{ const v=parseFloat(e.target.value); upd(w=>{ if (v>0) w.ceil=v; else delete w.ceil; }); if (v>0){ S.wallDef.ceil=v; saveWallDef(); } };
-  $('#pBase').value=W.base||'start'; if ($('#pLay')) $('#pLay').value=W.layMode||'auto';
-  if ($('#pLay')) $('#pLay').onchange=e=>{ upd(w=>w.layMode=e.target.value); S.wallDef.layMode=e.target.value; saveWallDef(); };
+  $('#pBase').value=W.base||'start'; const layA=layOf(W,false).start||W.layMode||'auto', layB=layOf(W,true).start||W.layMode||'auto'; if ($('#pLay')){ $('#pLay').value= layA===layB? layA : '__mix'; $('#pLay').options[0].hidden= layA===layB; }
+  if ($('#pLay')) $('#pLay').onchange=e=>{ const v=e.target.value; if (v==='__mix') return; upd(w=>{ w.layMode=v; for (const k of ['layLow','layUp','firstLow','firstUp']) delete w[k]; }); S.wallDef.layMode=v; if (S.wallDef.lay) for (const k of ['layLow','layUp','firstLow','firstUp']) delete S.wallDef.lay[k]; saveWallDef(); };
   if ($('#pPlanDet')) $('#pPlanDet').onchange=e=>{ S.planDetail=e.target.checked; try{ localStorage.setItem('pdfmeasure:plandetail', S.planDetail?'1':'0'); }catch(_){} drawOv(); };
   if ($('#pOpEdge')) $('#pOpEdge').onchange=e=>upd(w=>w.opEdge=e.target.checked);
   if ($('#pOpClr')) $('#pOpClr').onchange=e=>{ const v=Math.max(0,Math.min(600,+e.target.value||0)); upd(w=>w.opClr=v); };
@@ -2537,10 +2650,10 @@ function renderRoomProps(el,m){
 }
 function layoutTable(m){
   if (!wallOk(m)) return ''; const c=computeWall(m); if (!c.layers.length) return '';
-  return `<table class="lay"><tr><th>材料</th><th>方向</th><th>定尺</th><th>枚数</th><th>ロス</th></tr>${c.layers.map(k=>{ const L=c.boards[k]; return `<tr${L.conflict?' class="bad"':''}><td title="${esc(L.board.n)}">${k.replace(/^A/,'A面').replace(/^B/,'B面')}<small>${esc(L.board.n.replace(/^タイガー/,'').replace(/ボード・?/,''))}</small></td><td>${L.orient==='v'?'縦':'横'}</td><td>${L.bw}×${L.bl}</td><td>${L.sheets}</td><td>${(L.loss*100).toFixed(1)}%${L.offStud?`<small class="warn">スタッド外目地${L.offStud}</small>`:''}</td></tr>`; }).join('')}</table>
-  ${(()=>{ const W=m.wall; const e=c.layers.reduce((a,k)=>a+(c.boards[k].edge||0),0); const md={auto:'自動（ロス最小）',start:'片押し（始点から）',end:'片押し（終点から）',center:'中央振分け'}[W.layMode||'auto'];
-     return `<div class="pmini">割付：<b>${md}</b>${c.ops.length? (W.opEdge===false? '　開口キワの考慮：なし' : e? `　<span class="warn">⚠ 開口キワ（${+W.opClr||100}mm以内）の目地が ${e} 箇所残っています：${c.layers.filter(k=>c.boards[k].edge).map(k=>k.replace(/^A/,'A面').replace(/^B/,'B面')+c.boards[k].edge).join('・')}${(()=>{ const lowOnly=c.layers.filter(k=>c.boards[k].edge).every(k=>!k.includes('上')); return lowOnly&&c.layers.some(k=>k.includes('上'))? '（下張の目地はスタッド上に限られるため。仕上げ面の上張は回避済み。気になる場合は開口脇にスタッドを追加して目地位置を調整）' : (W.layMode||'auto')==='auto'? '' : '（片押し・振分けで目地位置が決まるため。「自動」にすると避けられる場合があります）'; })()}</span>` : '　開口キワの目地：なし ✓') : ''}</div>`; })()}
-  <div class="pmini">${(m.wall.layMode||'auto')==='auto'? '材料ごとに張り方向・定尺・目地位置を比較し、ロス率が最小の割付を採用' : '目地位置は割付の基準端から固定し、張り方向・定尺はロス最小を選択'}（下張の縦目地はスタッド上、上張は下張目地から100mm以上ずらす${c.ops.length&&m.wall.opEdge!==false?'、開口の縁の近くには目地を作らずL型に切り欠く':''}）。${c.layers.some(k=>c.boards[k].orient==='h')?' <span class="warn">横張りは認定・施工仕様書の張り方向条件を確認してください。</span>':''}</div>`;
+  return `<table class="lay"><tr><th>材料</th><th>方向</th><th>定尺</th><th>枚数</th><th>ロス</th></tr>${c.layers.map(k=>{ const L=c.boards[k]; return `<tr${L.conflict?' class="bad"':''}><td title="${esc(L.board.n)}">${sideName(k)}<small>${esc(L.board.n.replace(/^タイガー/,'').replace(/ボード・?/,''))}</small></td><td>${L.orient==='v'?'縦':'横'}</td><td>${L.bw}×${L.bl}</td><td>${L.sheets}</td><td>${(L.loss*100).toFixed(1)}%${L.offStud?`<small class="warn">スタッド外目地${L.offStud}</small>`:''}</td></tr>`; }).join('')}</table>
+  ${(()=>{ const W=m.wall; const e=c.layers.reduce((a,k)=>a+(c.boards[k].edge||0),0); const md=`捨て貼り ${layTxt(W,false)}／上貼り ${layTxt(W,true)}`;
+     return `<div class="pmini">割付：<b>${esc(md)}</b>${c.ops.length? (W.opEdge===false? '　開口キワの考慮：なし' : e? `　<span class="warn">⚠ 開口キワ（${+W.opClr||100}mm以内）の目地が ${e} 箇所残っています：${c.layers.filter(k=>c.boards[k].edge).map(k=>sideName(k)+c.boards[k].edge).join('・')}${(()=>{ const lowOnly=c.layers.filter(k=>c.boards[k].edge).every(k=>!k.includes('上')); return lowOnly&&c.layers.some(k=>k.includes('上'))? '（下張の目地はスタッド上に限られるため。仕上げ面の上張は回避済み。気になる場合は開口脇にスタッドを追加して目地位置を調整）' : (layOf(W,true).start||W.layMode||'auto')==='auto'? '' : '（片押し・振分けで目地位置が決まるため。「自動」にすると避けられる場合があります）'; })()}</span>` : '　開口キワの目地：なし ✓') : ''}</div>`; })()}
+  <div class="pmini">選んだ条件のほかは、材料ごとに張り方向・定尺・目地位置を比較し、ロス率が最小の割付を採用（下張の縦目地はスタッド上、上張は下張目地から100mm以上ずらす${c.ops.length&&m.wall.opEdge!==false?'、開口の縁の近くには目地を作らずL型に切り欠く':''}）。${c.layers.some(k=>c.boards[k].orient==='h')?' <span class="warn">横張りは認定・施工仕様書の張り方向条件を確認してください。</span>':''}</div>`;
 }
 // ---- 開口 ----
 function defaultsForMark(mark){
@@ -2702,41 +2815,102 @@ function drawWallPlan(c, m, col, sel){
 }
 // ---- 割付図（立面） ----
 let elevState={layer:'下地', zoom:1};
+const LV=(()=>{ try{ return Object.assign({front:false, open:true}, JSON.parse(localStorage.getItem('pdfmeasure:layview')||'{}')); }catch(e){ return {front:false, open:true}; } })();   // 見え方だけ（数量には関係しない）
+function saveLV(){ try{ localStorage.setItem('pdfmeasure:layview', JSON.stringify(LV)); }catch(e){} }
+function layPanel(m, others){
+  const W=m.wall, c=computeWall(m), sys=c.sys, opt=(k,arr,cur)=>`<select data-lk="${k}">${arr.map(([v,t])=>`<option value="${v}" ${String(cur)===v?'selected':''}>${t}</option>`).join('')}</select>`;
+  const num=(k,ph,max)=>`<input class="inp" data-lk="${k}" type="number" inputmode="numeric" min="0" max="${max||3030}" step="1" value="${+W[k]>0? +W[k] : ''}" placeholder="${ph}">`;
+  const ori=[['auto','自動（ロス最小）'],['v','縦張り'],['h','横張り']], lay=Object.entries(LAY_JP), vv=[['','自動'],['bottom','下から'],['top','上から']], jj=[['','自動'],['imo','通し目地（いも）'],['uma','千鳥目地']];
+  const row=(up)=>{ const t=up?'Up':'Low', bk=up? (W.upBoard||sys.up) : (W.lowBoard||sys.low), B=BOARDS[bk]||BOARDS[up?sys.up:sys.low], lens=B.lens||[1820,2420,2730,3030];
+    const ks=c.layers.filter(k=>k.includes('上')===up); const st=ks.map(k=>{ const L=c.boards[k], thin=cutList(c,k).parts.filter(p=>p.cut&&Math.min(p.w,p.h)<100), w=[thin.length? `100mm未満の細い切り物 ${thin.length}枚` : '', L.offStud? `スタッド外の目地 ${L.offStud}` : '', L.conflict?'縦目地が捨て貼りと重なる':'', L.ycf?'横目地が捨て貼りと重なる':'', L.edge? `開口キワの目地 ${L.edge}` : ''].filter(Boolean).join('・');
+      return `<div><b>${k[0]}面</b> ${oriJP(L.orient)} ${L.bw}×${L.bl}　${L.sheets}枚　ロス${(L.loss*100).toFixed(0)}%　<span class="cutv">${esc(edgeTxt(c,k))}</span>${L.alt?'　<span class="mut">（目地を逃がすため1枚目を切る）</span>':''}${w?`　<span class="warn">⚠ ${w}</span>`:''}</div>`; }).join('');
+    return `<div class="lcr"><h4>${up?'上貼り':'捨て貼り'}<small>${esc(B.n.replace(/^タイガー/,''))}</small></h4><div class="lcf">
+      <label>向き ${opt('orient'+t, ori, W['orient'+t]||W.orient||'auto')}</label><label>割付 ${opt('lay'+t, lay, W['lay'+t]||W.layMode||'auto')}</label><label title="割付の始まりの端から1枚目の寸法。空欄は成り行き">1枚目 ${num('first'+t,'成り行き')}mm</label>
+      <label>上下 ${opt('v'+t, vv, W['v'+t]||'')}</label><label>目地 ${opt('jt'+t, jj, W['jt'+t]||'')}</label><label>定尺 ${opt('len'+t, [['','自動'],...lens.map(l=>[String(l),String(l)])], W['len'+t]||'')}</label></div><div class="lcs">${st}</div></div>`; };
+  const canArr=!sys || sys.arr==='共通' || sys.arr==='千鳥';
+  return `<details class="laycond" ${LV.open?'open':''}><summary>割付の条件 <span class="mut">LGS：${esc(lgsTxt(W,c))}${sys&&c.layers.length?`／捨て貼り：${esc(layTxt(W,false))}${sys.layersPerSide>1?`／上貼り：${esc(layTxt(W,true))}`:''}`:''}</span></summary>
+   ${c.arr==='なし'? '<div class="pmini">この壁種はスタッドを立てないため、割付の条件はありません。</div>' : `<div class="lcr"><h4>LGS<small>${esc(c.st&&c.st.stud||'')}</small></h4><div class="lcf">
+      <label>建て方 ${canArr? opt('arr', [['',`壁種どおり${sys?'（'+sys.arr+'）':'（共通）'}`],['共通','共通'],['千鳥','千鳥']], W.arr||'') : esc(c.arr)}</label><label>間隔 <input class="inp" data-lk="pitch" type="number" inputmode="numeric" min="100" max="1200" list="lcPitch" value="${W.pitch||''}" placeholder="${sys?sys.pitch:455}">mm</label>
+      <label>割付 ${opt('base', Object.entries(LGS_BASE), W.base||'start')}</label><label title="割付の始まりの端から1本目（端のスタッドの次）までの寸法。中央割付では使いません">1本目 ${num('lgsFirst','成り行き',1200)}mm</label></div>
+      <div class="lcs">スタッド ${c.studs.length}本${sys&&c.arr!==sys.arr?'　<span class="warn">⚠ 壁種（認定）の建て方と違います</span>':''}</div></div><datalist id="lcPitch"><option value="227"></option><option value="303"></option><option value="455"></option><option value="606"></option></datalist>`}
+   ${sys&&c.layers.length? row(false)+(sys.layersPerSide>1? row(true) : '') : sys? '' : '<div class="pmini">壁仕様を選ぶと、捨て貼り・上貼りの貼り方を選べます。</div>'}
+   <div class="lcr"><h4>キワ<small>端の寸法</small></h4><div class="lcf"><label title="取り合いの壁を引く：このページで計測した壁との取り合いを見て、相手の壁厚の分だけ張る範囲を変えます">端 ${opt('fin', [['core','壁芯まで'],['auto','取り合いの壁厚を引く']], W.fin||'core')}</label><label>逃げ 始点 ${num('gapS','0',1000)}</label><label>終点 ${num('gapE','0',1000)}</label><label>上 ${num('gapT','0',500)}</label><label>下 ${num('gapB','0',500)}mm</label></div>
+      <div class="lcs">${W.fin==='auto'? (c.trim&&c.trim.found? `<span class="mut">${esc(trimTxt(c))}（出隅・入隅の勝ち負け＝ボード厚の差は引いていません）</span>` : '<span class="warn">⚠ 取り合う壁が見つかりません（壁芯までで出しています）。柱・躯体との取り合いは「逃げ」に入れてください</span>') : '<span class="warn">キワの寸法は壁芯までの長さです。実際のカット寸法にするには「取り合いの壁厚を引く」か「逃げ」を使ってください</span>'}</div></div>
+   <div class="lcb"><label class="chk"><input type="checkbox" data-lv="front" ${LV.front?'checked':''}> A面を正面から見た向きで描く（始点が右）</label><span style="flex:1"></span><button class="mini" data-la="reset">自動に戻す</button>${others>1?`<button class="mini pri" data-la="all">全${others}壁とこれから描く壁に同じ条件</button>`:''}</div></details>`;
+}
+function trimTxt(c){ const n=c.segs.length-1, f=v=>(v>=0?'−':'＋')+Math.abs(Math.round(v)); const t=c.trim; return `始点 A面 ${f(t.A[0].a)}・B面 ${f(t.B[0].a)}／終点 A面 ${f(t.A[n].b)}・B面 ${f(t.B[n].b)}mm`; }
+function bindLayPanel(root, m, ws, after){
+  const det=root.querySelector('.laycond'); if (!det) return; det.ontoggle=()=>{ LV.open=det.open; saveLV(); };
+  det.querySelectorAll('input,select').forEach(x=>x.addEventListener('keydown',e=>e.stopPropagation()));
+  const done=()=>{ save(); afterWallEdit(); after(); };
+  det.querySelectorAll('[data-lk]').forEach(el=>el.onchange=()=>{ const k=el.dataset.lk, W=m.wall; let v=el.value;
+    if (k==='pitch' && v!=='' && !(+v>=100 && +v<=1200)){ toast('スタッド間隔は 100〜1200mm で入力してください'); el.value=W.pitch||''; return; }
+    if (LAY_NUM[k] && v!=='' && !(+v>=0 && +v<=LAY_NUM[k])){ toast(`0〜${LAY_NUM[k]}mm で入力してください`); el.value=W[k]||''; return; }
+    pushUndo();
+    if (k==='pitch') W.pitch= v===''? '' : +v; else if (k==='base') W.base=v;
+    else if (v===''||v==='0') delete W[k]; else W[k]= LAY_NUM[k]? Math.round(+v) : v;
+    if (k.startsWith('orient') && W.orient){ const o=W.orient; delete W.orient; for (const z of ['orientLow','orientUp']) if (z!==k && !W[z]) W[z]=o; }
+    if (k==='fin' && v==='core') delete W.fin;
+    normLay(W); done(); });
+  det.querySelectorAll('[data-lv]').forEach(el=>el.onchange=()=>{ LV[el.dataset.lv]=el.checked; saveLV(); after(); });
+  det.querySelectorAll('[data-la]').forEach(b=>b.onclick=()=>{ pushUndo();
+    if (b.dataset.la==='reset'){ for (const k of LAY_KEYS) if (k!=='lens') delete m.wall[k]; m.wall.base='start'; m.wall.pitch=''; done(); toast('割付の条件を自動に戻しました'); return; }
+    const src=m.wall, keys=LAY_KEYS.filter(k=>!LAY_OWN.includes(k)); let n=0;
+    for (const q of ws){ if (q!==m && q.wall){ for (const k of keys){ if (src[k]!==undefined) q.wall[k]=JSON.parse(JSON.stringify(src[k])); else delete q.wall[k]; } } n++; }
+    const D={}; for (const k of keys) if (src[k]!==undefined && src[k]!=='') D[k]=src[k]; S.wallDef.lay=D; S.wallDef.base=src.base||'start'; S.wallDef.layMode=src.layMode||'auto'; saveWallDef();
+    done(); toast(`${n}壁に同じ条件を入れました（「逃げ 始点・終点」と「1本目」は壁ごとのまま）`); });
+}
+function cutTableHtml(c){
+  if (!c.layers.length) return '';
+  return `<h4 style="margin:12px 0 2px">キワ・カット寸法（幅×高さ mm）</h4><table class="qty cutq"><tr><th>層</th><th>場所</th><th>幅×高さ</th><th>枚</th><th>切り欠き</th></tr>${c.layers.map(k=>cutList(c,k).rows.map((r,i)=>`<tr${i===0?' class="first"':''}><td>${i===0?esc(sideName(k)):''}</td><td>${esc(r.where)}</td><td><b>${r.w}×${r.h}</b></td><td>${r.n}</td><td>${esc(r.note)}</td></tr>`).join('')).join('')}</table>`;
+}
+function cutRows(list){ const wno=wallNoMap(); const rows=[['No','ページ','名前','壁仕様','層','ボード','定尺','張り方向','場所','幅(mm)','高さ(mm)','枚数','切り欠き']];
+  for (const m of list){ const c=computeWall(m); for (const k of c.layers){ const L=c.boards[k]; for (const r of cutList(c,k).rows) rows.push([wno.get(m.id), m.page, m.name, c.sys?c.sys.name:'', sideName(k), L.board.n, `${L.bw}×${L.bl}`, oriJP(L.orient), r.where, r.w, r.h, r.n, r.note]); } }
+  return rows; }
 function showElevation(m){
-  const c=computeWall(m); if (!c.H){ toast('高さを入力してください'); return; }
+  let c=computeWall(m); if (!c.H){ toast('高さを入力してください'); return; }
   const dlg=$('#dlg'); dlg.classList.add('wide');
-  const layerBtns=['下地',...c.layers].map(l=>`<button data-l="${l}" class="${elevState.layer===l?'on':''}">${l==='下地'?'下地（スタッド）':l.replace(/^A/,'A面 ').replace(/^B/,'B面 ')+`（${c.boards[l].orient==='v'?'縦':'横'} ${c.boards[l].bl}／ロス${(c.boards[l].loss*100).toFixed(0)}%）`}</button>`).join('');
   dlg.innerHTML=`<h3>割付図 — ${esc(m.name)} ${c.sys?`／${esc(c.sys.name)}`:''}</h3>
-   <p class="sub">L=${fmtMm(c.Ltot)}　H=${c.H.toLocaleString()}mm　スタッド${c.arr}@${c.pitch}${c.st&&c.st.stud?`（${c.st.stud}）`:''}　割付基準：${({start:'始点から',center:'中央振分け',end:'終点から'})[m.wall.base||'start']}　ボード：${({auto:'自動（ロス最小）',start:'片押し（始点から）',end:'片押し（終点から）',center:'中央振分け'})[m.wall.layMode||'auto']}　※A面＝壁の始点→終点を見て左側</p>
-   <div class="tabs etabs">${layerBtns}<span style="margin-left:auto;display:flex;gap:4px;align-items:center"><button class="mini" id="eZo">－</button><button class="mini" id="eZi">＋</button></span></div>
+   <p class="sub">L=${fmtMm(c.Ltot)}　H=${c.H.toLocaleString()}mm${c.st&&c.st.stud?`　スタッド${c.st.stud}`:''}　※A面＝壁の始点→終点を見て左側</p>
+   <div id="eCond"></div>
+   <div class="tabs etabs" id="eTabs"></div>
    <div id="esvg" class="esvg"></div>
    <div id="eqty"></div>
-   <div class="acts"><button class="btn" id="eCopyQ">数量表をコピー</button><button class="btn" id="eCopyS">SVGをコピー</button><button class="btn pri" id="bCancel">閉じる</button></div>`;
-  const render=()=>{ $('#esvg').innerHTML=elevSVG(c, elevState.layer, elevState.zoom); };
-  dlg.querySelectorAll('.etabs [data-l]').forEach(b=>b.onclick=()=>{ elevState.layer=b.dataset.l; dlg.querySelectorAll('.etabs [data-l]').forEach(x=>x.classList.toggle('on',x===b)); render(); });
-  $('#eZo').onclick=()=>{ elevState.zoom=Math.max(0.25,elevState.zoom/1.4); render(); };
-  $('#eZi').onclick=()=>{ elevState.zoom=Math.min(8,elevState.zoom*1.4); render(); };
-  const q=quantities(c, m); $('#eqty').innerHTML=q.html;
+   <div class="acts"><button class="btn" id="eCopyQ">数量表をコピー</button><button class="btn" id="eCopyC">カット寸法をコピー</button><button class="btn" id="eCopyS">SVGをコピー</button><button class="btn pri" id="bCancel">閉じる</button></div>`;
+  let q; const draw=()=>{ $('#esvg').innerHTML=elevSVG(c, elevState.layer, elevState.zoom, {mir:LV.front&&elevState.layer[0]==='A'}); };
+  const render=()=>{ c=computeWall(m); if (elevState.layer!=='下地' && !c.boards[elevState.layer]) elevState.layer='下地';
+    const ws=wallList(); $('#eCond').innerHTML=layPanel(m, ws.length); bindLayPanel($('#eCond'), m, ws, render);
+    $('#eTabs').innerHTML=['下地',...c.layers].map(l=>`<button data-l="${l}" class="${elevState.layer===l?'on':''}">${l==='下地'?'下地（LGS）':sideName(l)+`（${c.boards[l].orient==='v'?'縦':'横'} ${c.boards[l].bl}／ロス${(c.boards[l].loss*100).toFixed(0)}%）`}</button>`).join('')+'<span style="margin-left:auto;display:flex;gap:4px;align-items:center"><button class="mini" id="eZo">－</button><button class="mini" id="eZi">＋</button></span>';
+    dlg.querySelectorAll('.etabs [data-l]').forEach(b=>b.onclick=()=>{ elevState.layer=b.dataset.l; dlg.querySelectorAll('.etabs [data-l]').forEach(x=>x.classList.toggle('on',x===b)); draw(); });
+    $('#eZo').onclick=()=>{ elevState.zoom=Math.max(0.25,elevState.zoom/1.4); draw(); };
+    $('#eZi').onclick=()=>{ elevState.zoom=Math.min(8,elevState.zoom*1.4); draw(); };
+    q=quantities(c, m); $('#eqty').innerHTML=cutTableHtml(c)+q.html; draw(); };
   $('#eCopyQ').onclick=async()=>{ try{ await navigator.clipboard.writeText(q.tsv); toast('数量表をコピーしました（Excelに貼付可）'); }catch(e){ showText('数量表',q.tsv); } };
+  $('#eCopyC').onclick=async()=>{ const t=cutRows([m]).map(r=>r.join('\t')).join('\n'); try{ await navigator.clipboard.writeText(t); toast('カット寸法をコピーしました（Excelに貼付可）'); }catch(e){ showText('カット寸法',t); } };
   $('#eCopyS').onclick=async()=>{ const s=$('#esvg').innerHTML; try{ await navigator.clipboard.writeText(s); toast('SVGをコピーしました（Illustrator等に貼付可）'); }catch(e){ showText('SVG',s); } };
   $('#bCancel').onclick=()=>{ closeModal(); dlg.classList.remove('wide'); };
   render(); $('#modal').classList.add('show');
 }
 function elevSVG(c, layer, zoom, o){
-  o=o||{}; let padL=70, padT=70, padB=70, padR=30, sc;
-  if (o.compact){ padL=44; padT=34; padB=44; padR=44; sc=Math.max(0.005, Math.min((o.h-padT-padB)/c.H, (o.w-padL-padR)/c.Ltot)); }
+  o=o||{}; const BL= layer!=='下地' && c.boards[layer] || null, mir=!!o.mir;
+  // 折れ点の外側は、張る範囲が壁芯より長い。その分だけ横にずらして描く
+  const shift=[]; let total=c.Ltot; { let acc=0; c.segs.forEach((g,i)=>{ const f=BL&&BL.fs.find(z=>z.i===i); const ea=f?Math.max(0,g.a-f.a):0, eb=f?Math.max(0,f.b-g.b):0; shift[i]=acc+ea; acc+=ea+eb; }); total+=acc; }
+  let padL=70, padT=70, padB=BL?84:70, padR=BL?56:30, sc;
+  if (o.compact){ padL=44; padT=34; padB=BL?54:48; padR=BL?50:44; sc=Math.max(0.005, Math.min((o.h-padT-padB)/c.H, (o.w-padL-padR)/total)); }
   else { const availH=Math.max(260, Math.min(520, innerHeight*0.5)); sc=(availH/ c.H)*zoom; }
-  const Wpx=c.Ltot*sc, Hpx=c.H*sc; const W=Wpx+padL+padR, Ht=Hpx+padT+padB;
-  const X=x=>padL+x*sc, Y=y=>padT+Hpx-y*sc;
+  const Wpx=total*sc, Hpx=c.H*sc; const W=Wpx+padL+padR, Ht=Hpx+padT+padB;
+  const siOf=x=>{ for (let i=0;i<c.segs.length;i++) if (x<=c.segs[i].b+0.5) return i; return c.segs.length-1; };
+  const X=(x,i)=>{ const u=x+shift[i==null? siOf(x) : i]; return padL+(mir? total-u : u)*sc; }, RX=(x,w,i)=> mir? X(x+w,i) : X(x,i), Y=y=>padT+Hpx-y*sc, X0=padL, X1=padL+Wpx;
+  const opI=p=>siOf((p.s+p.e)/2);
   let s=`<svg xmlns="http://www.w3.org/2000/svg" width="${W.toFixed(0)}" height="${Ht.toFixed(0)}" viewBox="0 0 ${W.toFixed(1)} ${Ht.toFixed(1)}" font-family="sans-serif" font-size="11">`;
   s+=`<rect x="0" y="0" width="${W}" height="${Ht}" fill="#fff"/>`;
   // wall outline & runners
-  s+=`<rect x="${X(0)}" y="${Y(c.H)}" width="${Wpx}" height="${Hpx}" fill="#f7f7f5" stroke="#333" stroke-width="1.2"/>`;
-  const rh=Math.max(2,40*sc); s+=`<rect x="${X(0)}" y="${Y(c.H)}" width="${Wpx}" height="${rh}" fill="#9aa7b4"/><rect x="${X(0)}" y="${Y(0)-rh}" width="${Wpx}" height="${rh}" fill="#9aa7b4"/>`;
-  for (const g of c.segs.slice(1)) s+=`<line x1="${X(g.a)}" y1="${Y(c.H)-14}" x2="${X(g.a)}" y2="${Y(0)+14}" stroke="#555" stroke-dasharray="6 4"/>`;
-  const boardSvg = (layer!=='下地' && c.boards[layer])? c.boards[layer].list.map(b=>`<rect x="${X(b.x)}" y="${Y(b.y+b.h)}" width="${b.w*sc}" height="${b.h*sc}" fill="${b.cut?'#fde6c8':'#e3edf8'}" fill-opacity=".72" stroke="#1d4f86" stroke-width="1.4"/>`).join('') : '';
+  s+=`<rect x="${X0}" y="${Y(c.H)}" width="${Wpx}" height="${Hpx}" fill="#f7f7f5" stroke="#333" stroke-width="1.2"/>`;
+  const rh=Math.max(2,40*sc); s+=`<rect x="${X0}" y="${Y(c.H)}" width="${Wpx}" height="${rh}" fill="#9aa7b4"/><rect x="${X0}" y="${Y(0)-rh}" width="${Wpx}" height="${rh}" fill="#9aa7b4"/>`;
+  c.segs.forEach((g,i)=>{ if (i) s+=`<line x1="${X(g.a,i)}" y1="${Y(c.H)-14}" x2="${X(g.a,i)}" y2="${Y(0)+14}" stroke="#555" stroke-dasharray="6 4"/>`; });
+  const boardSvg = BL? BL.list.map(b=>`<rect x="${RX(b.x,b.w,b.si)}" y="${Y(b.y+b.h)}" width="${b.w*sc}" height="${b.h*sc}" fill="${b.cut?'#fde6c8':'#e3edf8'}" fill-opacity=".72" stroke="#1d4f86" stroke-width="1.4"/>`).join('') : '';
   // sway
-  for (const y of c.sway) s+=`<line x1="${X(0)}" y1="${Y(y)}" x2="${X(c.Ltot)}" y2="${Y(y)}" stroke="#7a7a7a" stroke-dasharray="3 3"/>`;
+  for (const y of c.sway) s+=`<line x1="${X0}" y1="${Y(y)}" x2="${X1}" y2="${Y(y)}" stroke="#7a7a7a" stroke-dasharray="3 3"/>`;
   // studs
   const sw=Math.max(1.5, 45*sc);
   const studCol=s0=> s0.kind==='jamb'?'#d62728': s0.kind==='end'||s0.kind==='corner'?'#333': s0.side==='B'?'#2ca02c':'#1f77d4';
@@ -2745,28 +2919,53 @@ function elevSVG(c, layer, zoom, o){
   s+=boardSvg;
   // openings
   // 開口キワに残った縦目地を赤い破線で示す
-  if (layer!=='下地' && c.boards[layer] && c.boards[layer].edge){ const W=(c.wallRef||{}); const clr=+W.opClr||100; const jx=jointsX(c.boards[layer].list, c.segs);
+  if (BL && BL.edge){ const W=(c.wallRef||{}); const clr=+W.opClr||100; const jx=jointsX(BL.list, BL.fs);
     for (const o of c.ops) for (const x of jx) if (Math.abs(x-o.s)<clr || Math.abs(x-o.e)<clr) s+=`<line x1="${X(x)}" y1="${Y(c.H)}" x2="${X(x)}" y2="${Y(0)}" stroke="#d62728" stroke-width="2" stroke-dasharray="6 4"/><text x="${X(x)+3}" y="${Y(c.H)+12}" font-size="10" fill="#d62728">キワ目地</text>`; }
-  for (const o of c.ops){ const y0=+o.sill||0, y1=y0+ +o.h; s+=`<rect x="${X(o.s)}" y="${Y(y1)}" width="${(o.e-o.s)*sc}" height="${(y1-y0)*sc}" fill="#fff" stroke="#d62728" stroke-width="1.5"/>`;
-    s+=`<line x1="${X(o.s)}" y1="${Y(y1)}" x2="${X(o.e)}" y2="${Y(y0)}" stroke="#d62728" stroke-width=".6"/><line x1="${X(o.e)}" y1="${Y(y1)}" x2="${X(o.s)}" y2="${Y(y0)}" stroke="#d62728" stroke-width=".6"/>`;
+  for (const o of c.ops){ const y0=+o.sill||0, y1=y0+ +o.h, oi=opI(o), ox=RX(o.s,o.e-o.s,oi), ow=(o.e-o.s)*sc; s+=`<rect x="${ox}" y="${Y(y1)}" width="${ow}" height="${(y1-y0)*sc}" fill="#fff" stroke="#d62728" stroke-width="1.5"/>`;
+    s+=`<line x1="${ox}" y1="${Y(y1)}" x2="${ox+ow}" y2="${Y(y0)}" stroke="#d62728" stroke-width=".6"/><line x1="${ox+ow}" y1="${Y(y1)}" x2="${ox}" y2="${Y(y0)}" stroke="#d62728" stroke-width=".6"/>`;
     // header / sill members
-    s+=`<rect x="${X(o.s)}" y="${Y(y1)-Math.max(2,40*sc)}" width="${(o.e-o.s)*sc}" height="${Math.max(2,40*sc)}" fill="#d62728" opacity=".75"/>`;
-    if (y0>0) s+=`<rect x="${X(o.s)}" y="${Y(y0)}" width="${(o.e-o.s)*sc}" height="${Math.max(2,40*sc)}" fill="#d62728" opacity=".75"/>`;
-    s+=`<text x="${(X(o.s)+X(o.e))/2}" y="${(Y(y1)+Y(y0))/2}" text-anchor="middle" fill="#b00" font-weight="bold">${esc(o.mark||'開口')}</text><text x="${(X(o.s)+X(o.e))/2}" y="${(Y(y1)+Y(y0))/2+14}" text-anchor="middle" fill="#b00">${Math.round(o.e-o.s)}×${Math.round(+o.h)}${y0?` 下端${y0}`:''}</text>`; }
-  // dimension chain (top): studs
-  const xs=[...new Set(c.studs.map(t=>Math.round(t.x)))].sort((a,b)=>a-b);
-  const yd=padT-26; s+=`<line x1="${X(0)}" y1="${yd}" x2="${X(c.Ltot)}" y2="${yd}" stroke="#444" stroke-width=".8"/>`;
-  let lastLabelX=-1e9;
-  for (let i=0;i<xs.length;i++){ s+=`<line x1="${X(xs[i])}" y1="${yd-4}" x2="${X(xs[i])}" y2="${yd+4}" stroke="#444"/>`;
-    if (i>0){ const dx=xs[i]-xs[i-1], mx=(X(xs[i])+X(xs[i-1]))/2; if (dx*sc>22 && mx-lastLabelX>24){ s+=`<text x="${mx}" y="${yd-6}" text-anchor="middle" font-size="10" fill="#333">${dx}</text>`; lastLabelX=mx; } } }
-  // cumulative small
+    if (!BL){ s+=`<rect x="${ox}" y="${Y(y1)-Math.max(2,40*sc)}" width="${ow}" height="${Math.max(2,40*sc)}" fill="#d62728" opacity=".75"/>`;
+      if (y0>0) s+=`<rect x="${ox}" y="${Y(y0)}" width="${ow}" height="${Math.max(2,40*sc)}" fill="#d62728" opacity=".75"/>`; }
+    s+=`<text x="${ox+ow/2}" y="${(Y(y1)+Y(y0))/2}" text-anchor="middle" fill="#b00" font-weight="bold">${esc(o.mark||'開口')}</text><text x="${ox+ow/2}" y="${(Y(y1)+Y(y0))/2+14}" text-anchor="middle" fill="#b00">${Math.round(o.e-o.s)}×${Math.round(+o.h)}${y0?` 下端${y0}`:''}</text>`; }
+  // 寸法の列（目盛り＋数値。同じ幅が続く所は 910×5 にまとめる。切り物は赤）
+  const chain=(list, yy)=>{ let t=`<line x1="${X0}" y1="${yy}" x2="${X1}" y2="${yy}" stroke="#444" stroke-width=".8"/>`; const tick=x=>`<line x1="${x}" y1="${yy-4}" x2="${x}" y2="${yy+4}" stroke="#444"/>`; const gr=[];
+    for (const q of list){ const a=RX(q.x,q.w,q.si), b=a+q.w*sc, v=Math.round(q.w); t+=tick(a)+tick(b); const g=gr[gr.length-1]; if (g && g.v===v && g.red===q.red && g.si===q.si && Math.min(Math.abs(g.b-a),Math.abs(g.a-b))<0.6){ g.n++; g.a=Math.min(g.a,a); g.b=Math.max(g.b,b); } else gr.push({a,b,v,n:1,red:q.red,si:q.si}); }
+    for (const g of gr){ const tx=g.n>1? g.v+'×'+g.n : String(g.v); let fz=10; while (fz>7 && tx.length*fz*0.58>g.b-g.a-1) fz-=0.5; if (tx.length*fz*0.58>g.b-g.a+3) continue; t+=`<text x="${(g.a+g.b)/2}" y="${yy-4}" text-anchor="middle" font-size="${fz}" fill="${g.red?'#c01818':'#333'}" ${g.red?'font-weight="bold"':''}>${tx}</text>`; }
+    return t; };
+  const yd=padT-(o.compact?12:26);
+  if (BL){
+    const {parts}=cutList(c, layer), bx=(l)=>l.map(p=>({x:p.x,w:p.w,si:p.si,red:p.wc})).sort((a,b)=>a.si-b.si||a.x-b.x);
+    // 切り物の寸法をその場に書く
+    const L=BL, put=(cx,cy,w,h,txts,red)=>{ for (const [tx,rot] of txts){ const aw=rot?h:w, ah=rot?w:h; let fz=o.compact?10.5:12; const min=o.compact?7:8; while (fz>min && (tx.length*fz*0.56>aw-2 || fz>ah-1)) fz-=0.5; if (tx.length*fz*0.56>aw || fz>ah+0.5) continue;
+        return `<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" text-anchor="middle" dominant-baseline="central" font-size="${fz}" font-weight="bold" fill="${red?'#c01818':'#7a4a00'}" stroke="#fff" stroke-width="2.4" paint-order="stroke" ${rot?`transform="rotate(-90 ${cx.toFixed(1)} ${cy.toFixed(1)})"`:''}>${tx}</text>`; }
+      return ''; };
+    for (const p of parts){ if (!p.cut) continue; let r={x:p.x,y:p.y,w:p.w,h:p.h};
+      for (const n of p.n){ const c4=[{...r,w:n.x-r.x},{...r,x:n.x+n.w,w:r.x+r.w-n.x-n.w},{...r,h:n.y-r.y},{...r,y:n.y+n.h,h:r.y+r.h-n.y-n.h}].filter(z=>z.w>1&&z.h>1); if (c4.length) r=c4.reduce((a,b)=>a.w*a.h>=b.w*b.h?a:b); }
+      const pw=r.w*sc, ph=r.h*sc, cx=RX(r.x,r.w,p.si)+pw/2, cy=Y(r.y+r.h)+ph/2, w=Math.round(p.w), h=Math.round(p.h), full=`${w}×${h}`; const red=(p.S||p.E)&&p.wc;
+      const two=!p.n.length? '' : p.n.length===1? `欠${Math.round(p.n[0].w)}×${Math.round(p.n[0].h)}` : `欠${p.n.length}か所`;
+      const short= p.wc&&!p.hc? String(w) : p.hc&&!p.wc? String(h) : '';
+      if (two && ph>26){ s+=put(cx,cy-7,pw,ph/2,[[full,0]],red)+put(cx,cy+7,pw,ph/2,[[two,0]],false); }
+      else s+=put(cx,cy,pw,ph, pw>=ph? [[full,0],[full,1],...(short?[[short,0],[short,1]]:[])] : [...(pw>full.length*6? [[full,0]] : []),[full,1],...(short?[[short,0],[short,1]]:[])], red); }
+    const tb=bx(parts.filter(p=>p.T)), bb=bx(parts.filter(p=>p.B)); s+=chain(tb, yd)+chain(bb, Y(0)+17);
+    // 縦の目地（右端の列。千鳥・開口のある所は図の中の寸法で見る）
+    const last=mir? BL.fs[0] : BL.fs[BL.fs.length-1]; if (last){ const col=parts.filter(p=>p.si===last.i && (mir? p.S : p.E)).sort((a,b)=>a.y-b.y), xx=X1+14; if (col.length){ s+=`<line x1="${xx}" y1="${Y(BL.y0)}" x2="${xx}" y2="${Y(BL.y1)}" stroke="#444" stroke-width=".8"/>`;
+      for (const p of col){ const ya=Y(p.y+p.h), yb2=Y(p.y); s+=`<line x1="${xx-4}" y1="${ya}" x2="${xx+4}" y2="${ya}" stroke="#444"/><line x1="${xx-4}" y1="${yb2}" x2="${xx+4}" y2="${yb2}" stroke="#444"/>`; const tx=String(Math.round(p.h)); if (yb2-ya>tx.length*5+2) s+=`<text x="${xx+10}" y="${(ya+yb2)/2}" text-anchor="middle" dominant-baseline="central" font-size="10" fill="${p.hc?'#c01818':'#333'}" ${p.hc?'font-weight="bold"':''} transform="rotate(-90 ${xx+10} ${(ya+yb2)/2})">${tx}</text>`; } } }
+  } else {
+    // dimension chain (top): studs
+    const xs=[...new Set(c.studs.map(t=>Math.round(t.x)))].sort((a,b)=>a-b);
+    s+=`<line x1="${X0}" y1="${yd}" x2="${X1}" y2="${yd}" stroke="#444" stroke-width=".8"/>`;
+    let lastLabelX=-1e9;
+    for (let i=0;i<xs.length;i++){ s+=`<line x1="${X(xs[i])}" y1="${yd-4}" x2="${X(xs[i])}" y2="${yd+4}" stroke="#444"/>`;
+      if (i>0){ const dx=xs[i]-xs[i-1], mx=(X(xs[i])+X(xs[i-1]))/2; if (dx*sc>22 && mx-lastLabelX>24){ s+=`<text x="${mx}" y="${yd-6}" text-anchor="middle" font-size="10" fill="#333">${dx}</text>`; lastLabelX=mx; } } }
+  }
   // overall & segments (bottom)
-  const yb=Y(0)+28; s+=`<line x1="${X(0)}" y1="${yb}" x2="${X(c.Ltot)}" y2="${yb}" stroke="#444"/>`;
-  for (const g of c.segs){ s+=`<line x1="${X(g.a)}" y1="${yb-5}" x2="${X(g.a)}" y2="${yb+5}" stroke="#444"/><line x1="${X(g.b)}" y1="${yb-5}" x2="${X(g.b)}" y2="${yb+5}" stroke="#444"/><text x="${(X(g.a)+X(g.b))/2}" y="${yb-5}" text-anchor="middle" fill="#222">${Math.round(g.L).toLocaleString()}</text>`; }
-  if (c.segs.length>1) s+=`<text x="${(X(0)+X(c.Ltot))/2}" y="${yb+20}" text-anchor="middle" font-weight="bold" fill="#222">L=${Math.round(c.Ltot).toLocaleString()}</text>`;
+  const yb=Y(0)+(BL? 37 : 28); s+=`<line x1="${X0}" y1="${yb}" x2="${X1}" y2="${yb}" stroke="#444"/>`;
+  c.segs.forEach((g,i)=>{ const f=BL? BL.fs.find(z=>z.i===i) : null, a=f?f.a:g.a, b=f?f.b:g.b, xa=X(a,i), xb=X(b,i); s+=`<line x1="${xa}" y1="${yb-5}" x2="${xa}" y2="${yb+5}" stroke="#444"/><line x1="${xb}" y1="${yb-5}" x2="${xb}" y2="${yb+5}" stroke="#444"/><text x="${(xa+xb)/2}" y="${yb-5}" text-anchor="middle" fill="#222">${Math.round(b-a).toLocaleString()}</text>`; });
+  if (c.segs.length>1) s+=`<text x="${(X0+X1)/2}" y="${yb+(o.compact||BL?14:20)}" text-anchor="middle" font-weight="bold" fill="#222">L=${Math.round(c.Ltot).toLocaleString()}</text>`;
+  for (const [t,x,an] of [[mir?'終点':'始点',X0,'start'],[mir?'始点':'終点',X1,'end']]) s+=`<text x="${x}" y="${yb+13}" text-anchor="${an}" font-size="9.5" fill="#1d4f86">${t}</text>`;
   // height
   const xl=padL-30; s+=`<line x1="${xl}" y1="${Y(0)}" x2="${xl}" y2="${Y(c.H)}" stroke="#444"/><line x1="${xl-5}" y1="${Y(0)}" x2="${xl+5}" y2="${Y(0)}" stroke="#444"/><line x1="${xl-5}" y1="${Y(c.H)}" x2="${xl+5}" y2="${Y(c.H)}" stroke="#444"/><text x="${xl-6}" y="${(Y(0)+Y(c.H))/2}" text-anchor="middle" transform="rotate(-90 ${xl-6} ${(Y(0)+Y(c.H))/2})" fill="#222">H=${c.H.toLocaleString()}</text>`;
-  for (const y of c.sway) s+=`<text x="${X(c.Ltot)+4}" y="${Y(y)+4}" font-size="9" fill="#777">振れ止め</text>`;
+  if (!BL) for (const y of c.sway) s+=`<text x="${X1+4}" y="${Y(y)+4}" font-size="9" fill="#777">振れ止め</text>`;
   // legend
   const lg=[['#1f77d4','スタッド（A面側）'],['#2ca02c','スタッド（B面側）'],['#333','端部・コーナー'],['#d62728','開口補強（縦枠・まぐさ/窓台）'],['#999','—']];
   let lx=padL; const ly=16; const legend=(c.arr==='千鳥'? lg.slice(0,4) : [['#1f77d4','スタッド'],lg[2],lg[3]]);
@@ -2786,8 +2985,8 @@ function quantities(c, m){
   add('下地','ランナー（上下）',runner, (c.Ltot*2*rowsMul/1000).toFixed(1),'m');
   if (c.sway.length) add('下地','振れ止め（@1200）','', (c.Ltot*c.sway.length*rowsMul/1000).toFixed(1),'m');
   add('下地','開口 まぐさ・窓台','', (c.ops.reduce((a,o)=>a+(o.e-o.s)*((+o.sill||0)>0?2:1),0)/1000).toFixed(2),'m');
-  for (const k of c.layers){ const L=c.boards[k]; const nm=k.replace(/^A/,'A面 ').replace(/^B/,'B面 ');
-    add('ボード',nm+'（'+(L.orient==='v'?'縦張り':'横張り')+'）', `${L.board.n} ${L.bw}×${L.bl}`, L.sheets,'枚');
+  for (const k of c.layers){ const L=c.boards[k]; const nm=sideName(k);
+    add('ボード',nm+'（'+oriJP(L.orient)+'）', `${L.board.n} ${L.bw}×${L.bl}`, L.sheets,'枚');
     add('ボード',nm+' 割付ピース／ロス率', `張付面積 ${(L.used/1e6).toFixed(2)} m²`, `${L.list.length}片（切物 ${L.list.filter(b=>b.cut).length}）／${(L.loss*100).toFixed(1)}%`,''); }
   add('面積','壁面積（片面・開口控除後）','', (c.net/1e6).toFixed(2),'m²');
   add('面積','開口面積','', (c.opArea/1e6).toFixed(2),'m²');
@@ -3470,7 +3669,7 @@ const DXF_SPEC={'a2k':'A2000WI','a2k-ac':'A2000WI_A','a2k-s':'A2000WI_S','a2k-me
 function takeoffWork(){
   const head=['No','含む','番号','壁符号','種別','長さ(mm)','高さ(mm)','面積(m2)','建具/開口符号','開口幅(mm)','開口高さ(mm)','開口上面積(m2)','開口種別','始点X','始点Y','終点X','終点Y','ボード高さ(mm)','直交L(か所)'];
   const rows=[head], syms=new Map(), wno=wallNoMap(), r1=v=>Math.round(v*10)/10, r3=v=>Math.round(v*1000)/1000;
-  const info={walls:0, pieces:0, ops:0, noScale:0, noSpec:0, changed:0, ceil:0, sill:0};
+  const info={walls:0, pieces:0, ops:0, noScale:0, noSpec:0, changed:0, arr:0, ceil:0, sill:0};
   let no=0;
   for (const m of wallList()){
     const k=mmPer(m.page); if (k==null || !scaleOf(m.page)){ info.noScale++; continue; }
@@ -3478,6 +3677,7 @@ function takeoffWork(){
     if (!syms.has(sym)) syms.set(sym, {sym, legend: sys&&DXF_SPEC[sys.id]? {sys:DXF_SPEC[sys.id], a:'', b:'', lgs:1} : null});
     if (!sys || !DXF_SPEC[sys.id]) info.noSpec++;
     if (W.upBoard||W.lowBoard) info.changed++;
+    if (sys && c.arr!==sys.arr) info.arr++;
     if (c.Hb<c.H) info.ceil++;
     info.walls++;
     const off=m.page*1e7;   // ページごとに座標を離す（積算は開口と壁片を近さで結ぶ）
@@ -3508,6 +3708,7 @@ async function exportTakeoff(){
   const notes=[`壁 ${info.walls}本（壁片 ${info.pieces}・開口 ${info.ops}）`];
   if (info.noSpec) notes.push(`壁種を積算で選ぶ必要がある壁 ${info.noSpec}本`);
   if (info.changed) notes.push(`ボードを変えた壁 ${info.changed}本は、積算では認定仕様のボードで数えます`);
+  if (info.arr) notes.push(`LGS の建て方を変えた壁 ${info.arr}本は、積算では壁種の建て方で数えます`);
   if (info.noScale) notes.push(`縮尺のないページの壁 ${info.noScale}本は外しました`);
   showText('積算へ書き出しました', notes.join('\n')+'\n\n材料積算（dxf-takeoff）の「ファイルを開く」でこのファイルを選ぶと、積算の決まり（割付・ボード倍率・副資材）で数量が出ます。\n割増はボード倍率・下地倍率で積算側に入れてください。');
 }
@@ -3676,7 +3877,7 @@ function cleanState(j){
       m.name = typeof m.name==='string'? m.name.slice(0,200) : String(m.name??'計測'); m.page=+k; if (!Number.isFinite(+m.id)) m.id=0; maxId=Math.max(maxId,+m.id||0);
       if (m.arcs && !isObj(m.arcs)) delete m.arcs; if (m.arcs) for (const i in m.arcs) if (!Number.isFinite(+m.arcs[i])) delete m.arcs[i];
       if (m.wall!=null){ if (!isObj(m.wall)) delete m.wall; else { const W=m.wall; W.h = Number.isFinite(+W.h)? +W.h : 0; if (!Array.isArray(W.openings)) W.openings=[];
-        W.openings=W.openings.filter(o=>isObj(o) && [o.s,o.w,o.h].every(v=>Number.isFinite(+v))); if (typeof W.sys!=='string') W.sys=''; } }
+        W.openings=W.openings.filter(o=>isObj(o) && [o.s,o.w,o.h].every(v=>Number.isFinite(+v))); if (typeof W.sys!=='string') W.sys=''; normLay(W); } }
       return true; }); }
   if (isObj(j.scales)) for (const k in j.scales){ const sc=j.scales[k]; if (pg(k) && isObj(sc) && Number.isFinite(+sc.mmPerUnit) && +sc.mmPerUnit>0){ sc.mmPerUnit=+sc.mmPerUnit; sc.label = typeof sc.label==='string'? sc.label : '1/'+Math.round(sc.mmPerUnit/(25.4/72)); out.scales[k]=sc; } else out.dropped++; }
   if (isObj(j.rots)) for (const k in j.rots){ const r=+j.rots[k]; if (pg(k) && [0,90,180,270].includes(r)) out.rots[k]=r; }
@@ -3885,10 +4086,10 @@ function openWallBatch(opt={}){
      <label>オプション <select id="wbOpt"><option value="__keep">変更しない</option><option value="">標準</option><option value="ac">アクリア仕様</option><option value="s">-S 生活音対策（サウンドカット）</option></select></label>
      <span class="wbsep"></span>
      <label>スタッド間隔 <input class="inp" id="wbPitch" type="number" min="0" step="1" list="wbPitchL" placeholder="変更しない"> mm<datalist id="wbPitchL"><option value="0">仕様の標準</option><option value="303"></option><option value="455"></option><option value="606"></option></datalist></label>
-     <label>割付基準 <select id="wbBase"><option value="__keep">変更しない</option><option value="start">始点から</option><option value="center">中央振分け</option><option value="end">終点から</option></select></label>
-     <label>ボード割付 <select id="wbLay"><option value="__keep">変更しない</option><option value="auto">自動（ロス最小）</option><option value="start">片押し（始点から）</option><option value="end">片押し（終点から）</option><option value="center">中央振分け</option></select></label>
-     <label>下張の方向 <select id="wbOL"><option value="__keep">変更しない</option><option value="auto">自動（ロス最小）</option><option value="v">縦張り</option><option value="h">横張り</option></select></label>
-     <label>上張の方向 <select id="wbOU"><option value="__keep">変更しない</option><option value="auto">自動（ロス最小）</option><option value="v">縦張り</option><option value="h">横張り</option></select></label>
+     <label>割付基準 <select id="wbBase"><option value="__keep">変更しない</option>${Object.entries(LGS_BASE).map(([v,t])=>`<option value="${v}">${t}</option>`).join('')}</select></label>
+     <label>ボード割付 <select id="wbLay"><option value="__keep">変更しない</option>${Object.entries(LAY_JP).map(([v,t])=>`<option value="${v}">${t}</option>`).join('')}</select></label>
+     <label>捨て貼りの向き <select id="wbOL"><option value="__keep">変更しない</option><option value="auto">自動（ロス最小）</option><option value="v">縦張り</option><option value="h">横張り</option></select></label>
+     <label>上貼りの向き <select id="wbOU"><option value="__keep">変更しない</option><option value="auto">自動（ロス最小）</option><option value="v">縦張り</option><option value="h">横張り</option></select></label>
      <span class="wbsep"></span>
      <button class="btn pri" id="wbApply">選択した線分に適用</button>
      <label title="公共建築数量積算基準：内部仕上の開口部は1箇所0.5m²以下なら控除しない" style="margin-left:auto"><input type="checkbox" id="wbRule" ${WRULE.minDed? 'checked':''}> 0.5m²以下の開口は控除しない</label>
@@ -3943,7 +4144,7 @@ function openWallBatch(opt={}){
       tr.querySelector('.nm').onclick=()=>{ closeDlg(); if (m.page!==S.page) gotoPage(m.page).then(()=>{ S.sel=m.id; zoomTo(m); refreshList(); }); else { S.sel=m.id; zoomTo(m); refreshList(); } };
       tr.querySelectorAll('[data-f]').forEach(inp=>{ inp.addEventListener('keydown',e=>e.stopPropagation()); inp.onchange=e=>{ const f=inp.dataset.f, v=e.target.value; pushUndo();
         if (f==='h'){ let hv=+v||0; if (hv>0){ hv=normH(hv); if (!hv){ S.undo.pop(); render(); return; } } if (!m.wall){ if (!(hv>0)){ S.undo.pop(); return; } m.wall=newWallObj(); wallRename(m); } m.wall.h=hv; }
-        if (f==='sys'){ if (!m.wall){ if (!v) return; m.wall=newWallObj(); m.wall.h=0; } m.wall.sys=v; m.wall.pitch=''; if (m.wall.opt && !WVAR[v+'|'+m.wall.opt]) delete m.wall.opt; }
+        if (f==='sys'){ if (!m.wall){ if (!v) return; m.wall=newWallObj(); m.wall.h=0; } m.wall.sys=v; m.wall.pitch=''; delete m.wall.arr; if (m.wall.opt && !WVAR[v+'|'+m.wall.opt]) delete m.wall.opt; }
         if (f==='opt'){ if (v) m.wall.opt=v; else delete m.wall.opt; }
         save(); afterWallEdit(); render(); }; }); });
   };
@@ -3963,13 +4164,13 @@ function openWallBatch(opt={}){
     for (const m of lineMeasAll().filter(x=>WB.sel.has(x.id))){
       if (!m.wall){ if (!(hv>0) && (sv==='__keep'||!sv)){ skip++; continue; } m.wall=newWallObj(); if (hv==null) m.wall.h=0; wallRename(m); }
       if (hv!=null) m.wall.h=hv;
-      if (sv!=='__keep'){ m.wall.sys=sv; m.wall.pitch=''; }
+      if (sv!=='__keep'){ m.wall.sys=sv; m.wall.pitch=''; delete m.wall.arr; }
       if (ov!=='__keep'){ if (ov && WVAR[m.wall.sys+'|'+ov]) m.wall.opt=ov; else delete m.wall.opt; }
       if (m.wall.opt && !WVAR[m.wall.sys+'|'+m.wall.opt]) delete m.wall.opt;
       if (bv!=='__keep') m.wall.base=bv;
       if (pv!=null) m.wall.pitch = pv>0? pv : '';
       if (olv!=='__keep'){ m.wall.orientLow=olv; delete m.wall.orient; }
-      if (lyv!=='__keep') m.wall.layMode=lyv;
+      if (lyv!=='__keep'){ m.wall.layMode=lyv; for (const k of ['layLow','layUp','firstLow','firstUp']) delete m.wall[k]; }
       if (ouv!=='__keep'){ m.wall.orientUp=ouv; delete m.wall.orient; }
       if (cv!=null){ if (cv>0) m.wall.ceil=cv; else delete m.wall.ceil; }
       n++; }
@@ -3997,7 +4198,7 @@ function openWallBatch(opt={}){
 }
 function oriTxt(c, W){ const o=k=>{ const L=c.boards[k]; if (!L) return ''; const f=k.includes('上')? (W.orientUp||W.orient||'auto') : (W.orientLow||W.orient||'auto'); return (L.orient==='v'?'縦':'横')+(f==='auto'?'':'固定'); };
   const lo=c.layers.find(k=>k[0]==='A'&&!k.includes('上'))||c.layers.find(k=>!k.includes('上')), up=c.layers.find(k=>k[0]==='A'&&k.includes('上'));
-  return `@${c.pitch}${W.pitch?'＊':''}${lo?' 下'+o(lo):''}${up?'・上'+o(up):''}`; }
+  return `@${c.pitch}${W.pitch?'＊':''}${lo?' 捨'+o(lo):''}${up?'・上'+o(up):''}`; }
 function confirmInline(btn, msg){ if (btn._armed && Date.now()-btn._armed<4000){ btn._armed=0; btn.textContent=btn._txt; return true; } btn._txt=btn._txt||btn.textContent; btn._armed=Date.now(); btn.textContent=msg+'（もう一度押して確定）'; setTimeout(()=>{ if (btn._armed){ btn._armed=0; btn.textContent=btn._txt; } },4000); return false; }
 function nextWallName(){ let mx=0; for (const pg in S.meas) for (const q of S.meas[pg]) { const r=/^壁 (\d+)$/.exec(q.name||''); if (r) mx=Math.max(mx,+r[1]); } return '壁 '+(mx+1); }
 function renumberWallNames(){ const mp=wallNoMap(); for (const m of lineMeasAll()) if (mp.has(m.id) && /^壁 \d+$/.test(m.name||'')) m.name='壁 '+mp.get(m.id); }
@@ -4017,7 +4218,7 @@ function wallTableRows(list){
 // ---- 展開図（割付図）ビューア：壁①②③…を1ページずつ ----
 const DV={i:0, mode:'all', ids:[]};
 const SHEET={W:1587, H:1123};                     // A3横（96dpi）
-function layerChoices(c){ const ch=[['all','全層'],['下地','下地']]; for (const sd of ['A','B']) if (c.layers.some(l=>l[0]===sd)) ch.push([sd, sd+'面']); return ch; }
+function layerChoices(c){ const ch=[['all','全層'],['下地','下地']]; for (const sd of ['A','B']) if (c.layers.some(l=>l[0]===sd)) ch.push([sd, sd+'面']); if (c.layers.length) ch.push(['cut','カット寸法表']); return ch; }
 function sheetLayers(c, mode){
   if (mode==='下地') return ['下地'];
   if (mode==='A'||mode==='B') return c.layers.filter(l=>l[0]===mode);
@@ -4055,14 +4256,21 @@ function sheetSVG(m, no, total, mode){
   s+=tx(W-M-14, hy+48, `${CIRC(no)}　${no} / ${total}　${baseName()}`, 'text-anchor="end" font-size="13" fill="#555"');
   const top=M+76; s+=`<line x1="${M}" y1="${top}" x2="${W-M}" y2="${top}" stroke="#222"/><line x1="${W-M-RW}" y1="${top}" x2="${W-M-RW}" y2="${H-M}" stroke="#222"/>`;
   // 立面パネル（列数を自動で選び、最も大きく描ける配置に）
-  const layers=sheetLayers(c, mode); const LX=M+12, LY=top+10, LW=W-M-RW-12-LX, LH=H-M-10-LY; const gap=14, cap=22;
+  const layers= mode==='cut'? [] : sheetLayers(c, mode); const LX=M+12, LY=top+10, LW=W-M-RW-12-LX, LH=H-M-10-LY; const gap=14, cap=22;
   let best=null; for (let cols=1; cols<=Math.min(3,layers.length); cols++){ const rows=Math.ceil(layers.length/cols); const pw=(LW-(cols-1)*gap)/cols, ph=(LH-(rows-1)*gap)/rows - cap;
-    const sc=Math.min((ph-78)/c.H, (pw-88)/c.Ltot); if (!best || sc>best.sc*1.02) best={cols,rows,pw,ph,sc}; }
-  best.ph=Math.min(best.ph, best.sc*c.H+78+6);
+    const sc=Math.min((ph-88)/c.H, (pw-94)/c.Ltot); if (!best || sc>best.sc*1.02) best={cols,rows,pw,ph,sc}; }
+  if (best) best.ph=Math.min(best.ph, best.sc*c.H+88+6);
+  if (mode==='cut'){ // カット寸法表（層ごと、2列に流す）
+    const one=c.layers.reduce((a,l)=>a+cutList(c,l).rows.length*16+48,0)<LH-40, cw=one? LW : (LW-20)/2, nMax=one? 70 : 18, rowH=16; let col=0, yy=LY+8, left=0; const bot=LY+LH-26; const room=h=>{ if (yy+h<=bot) return true; if (col===0 && !one){ col=1; yy=LY+8; return yy+h<=bot; } return false; };
+    for (const l of c.layers){ const L=c.boards[l], rows=cutList(c,l).rows; if (!rows.length) continue; if (!room(54)){ left+=rows.length; continue; } const bx=()=>LX+col*(cw+20);
+      s+=`<rect x="${bx()}" y="${yy}" width="${cw}" height="20" fill="#eaf1f9"/>`+tx(bx()+8, yy+14, `${sideName(l)} — ${L.board.n.replace(/^タイガー/,'')} ${L.bw}×${L.bl}　${oriJP(L.orient)}　${L.sheets}枚`, 'font-size="13" font-weight="bold" fill="#1d4f86"'); yy+=34;
+      for (const r of rows){ if (!room(rowH)){ left++; continue; } const x=bx(); s+=tx(x+8, yy, r.where.length>24? r.where.slice(0,23)+'…' : r.where, `font-size="12" fill="${r.end?'#c01818':'#222'}" ${r.end?'font-weight="bold"':''}`)+tx(x+300, yy, `${r.w} × ${r.h}`, 'font-size="12.5" font-weight="bold" text-anchor="end" fill="#111"')+tx(x+334, yy, r.n+'枚', 'font-size="12" text-anchor="end"')+tx(x+344, yy, r.note.length>nMax? r.note.slice(0,nMax-1)+'…' : r.note, 'font-size="10.5" fill="#666"'); yy+=rowH; }
+      yy+=14; }
+    s+=tx(LX, LY+LH-4, `寸法は 幅×高さ（mm）。${left?`ほか ${left}種は「カット寸法CSV」にあります。`:''}`, 'font-size="12" fill="#666"'); }
   layers.forEach((l,i)=>{ const col=i%best.cols, row=Math.floor(i/best.cols); const x=LX+col*(best.pw+gap), y=LY+row*(best.ph+cap+gap);
-    const L=c.boards[l]; const ttl = l==='下地'? `下地（スタッド ${c.arr}@${c.pitch}${c.st&&c.st.stud?`・${c.st.stud}`:''}）` : `${l.replace(/^A/,'A面 ').replace(/^B/,'B面 ')} — ${L.board.n.replace(/^タイガー/,'')} ${L.bw}×${L.bl}　${L.orient==='v'?'縦張り':'横張り'}　${L.sheets}枚　ロス${(L.loss*100).toFixed(1)}%`;
+    const L=c.boards[l]; const ttl = l==='下地'? `下地（スタッド ${lgsTxt(m.wall,c)}${c.st&&c.st.stud?`・${c.st.stud}`:''}）` : `${sideName(l)} — ${L.board.n.replace(/^タイガー/,'')} ${L.bw}×${L.bl}　${oriJP(L.orient)}　${L.sheets}枚　ロス${(L.loss*100).toFixed(1)}%`;
     s+=`<rect x="${x}" y="${y}" width="${best.pw}" height="${best.ph+cap}" fill="none" stroke="#ddd"/>`+tx(x+8, y+16, ttl, `font-size="13" font-weight="bold" fill="${l==='下地'?'#333':'#1d4f86'}"`);
-    s+=nestSvg(elevSVG(c, l, 1, {compact:true, w:best.pw, h:best.ph}), x, y+cap, best.pw, best.ph); });
+    s+=nestSvg(elevSVG(c, l, 1, {compact:true, w:best.pw, h:best.ph, mir:LV.front&&l[0]==='A'}), x, y+cap, best.pw, best.ph); });
   // 右欄：キープラン・データ・材料・開口
   const RX=W-M-RW+12, RWi=RW-24; let y=top+12;
   s+=keyPlanSVG(m, RX, y, RWi, 250); y+=266;
@@ -4071,13 +4279,18 @@ function sheetSVG(m, no, total, mode){
     ...(sys&&sys.sides===2? [['両面計', m2(c.net*2)+' m²']] : []), ['スタッド', `${c.studs.length}本${c.st&&c.st.stud?`（${c.st.stud}／ランナー${c.st.runner}）`:''}`]];
   for (const [k,v] of kv){ const hl=/控除後/.test(k); if (hl) s+=`<rect x="${RX-4}" y="${y-14}" width="${RWi+8}" height="20" fill="#fff4d6"/>`; s+=tx(RX, y, k, 'fill="#666" font-size="12.5"')+tx(RX+RWi, y, v, `text-anchor="end" font-size="${String(v).length>30?11:12.5}" ${hl?'font-weight="bold"':''} fill="#111"`); y+=20; }
   y+=8; if (c.layers.length){ s+=tx(RX, y, 'ボード', 'font-weight="bold" font-size="13"'); y+=18;
-    for (const l of c.layers){ const L=c.boards[l]; s+=tx(RX, y, `${l.replace(/^A/,'A面').replace(/^B/,'B面')} ${L.board.n.replace(/^タイガー/,'').replace(/ボード・?/,'')} ${L.bw}×${L.bl}`, 'font-size="12"')+tx(RX+RWi, y, `${L.orient==='v'?'縦':'横'} ${L.sheets}枚 ロス${(L.loss*100).toFixed(0)}%`, 'text-anchor="end" font-size="12"'); y+=17; } }
+    for (const l of c.layers){ const L=c.boards[l]; s+=tx(RX, y, `${sideName(l)} ${L.board.n.replace(/^タイガー/,'').replace(/ボード・?/,'')} ${L.bw}×${L.bl}`, 'font-size="12"')+tx(RX+RWi, y, `${L.orient==='v'?'縦':'横'} ${L.sheets}枚 ロス${(L.loss*100).toFixed(0)}%`, 'text-anchor="end" font-size="12"'); y+=17; } }
+  if (c.layers.length){ const W0=m.wall; y+=6; s+=tx(RX, y, '割付の条件', 'font-weight="bold" font-size="13"'); y+=17;
+    for (const [k,v] of [['LGS',lgsTxt(W0,c)],['捨て貼り',layTxt(W0,false)],...(c.layers.some(l=>l.includes('上'))?[['上貼り',layTxt(W0,true)]]:[])]){ s+=tx(RX, y, k, 'font-size="11.5" fill="#666"')+tx(RX+58, y, v, `font-size="${v.length>30?9.5:11.5}" fill="#111"`); y+=16; }
+    y+=6; s+=tx(RX, y, 'キワのカット寸法', 'font-weight="bold" font-size="13" fill="#c01818"')+tx(RX+RWi, y, W0.fin==='auto'? (c.trim&&c.trim.found?'取り合いの壁厚を引いた寸法':'取り合う壁なし（壁芯まで）') : (W0.gapS||W0.gapE)? '壁芯から逃げを引いた寸法' : '壁芯までの寸法', `font-size="11" text-anchor="end" fill="${W0.fin==='auto'&&c.trim&&c.trim.found?'#555':'#c01818'}"`); y+=17;
+    for (const l of c.layers){ const t=edgeTxt(c,l); s+=tx(RX, y, sideName(l), 'font-size="11.5" fill="#666"')+tx(RX+84, y, t, `font-size="${t.length>34?9.5:11.5}" font-weight="bold" fill="#111"`); y+=16; } }
+  const nOp=Math.max(1, Math.min(10, Math.floor((H-M-14-3*18-22-20-y-40)/17)));
   if (c.ops.length){ y+=8; s+=tx(RX, y, '開口', 'font-weight="bold" font-size="13"'); y+=18;
-    for (const o of c.ops.slice(0,10)){ s+=tx(RX, y, `${o.mark||'開口'}　位置 ${mm(o.s)}`, 'font-size="12"')+tx(RX+RWi, y, `${mm(o.e-o.s)}×${mm(+o.h)}${+o.sill?`　下端${mm(+o.sill)}`:''}`, 'text-anchor="end" font-size="12"'); y+=17; }
-    if (c.ops.length>10){ s+=tx(RX, y, `ほか${c.ops.length-10}箇所`, 'font-size="11" fill="#777"'); y+=17; } }
+    for (const o of c.ops.slice(0,nOp)){ s+=tx(RX, y, `${o.mark||'開口'}　位置 ${mm(o.s)}`, 'font-size="12"')+tx(RX+RWi, y, `${mm(o.e-o.s)}×${mm(+o.h)}${+o.sill?`　下端${mm(+o.sill)}`:''}`, 'text-anchor="end" font-size="12"'); y+=17; }
+    if (c.ops.length>nOp){ s+=tx(RX, y, `ほか${c.ops.length-nOp}箇所`, 'font-size="11" fill="#777"'); y+=17; } }
   // 凡例
   const lg=[['#1f77d4', c.arr==='千鳥'?'スタッド（A面側）':'スタッド'], ...(c.arr==='千鳥'? [['#2ca02c','スタッド（B面側）']] : []), ['#333','端部・コーナー'], ['#d62728','開口補強'], ['#e3edf8','ボード（定尺）'], ['#fde6c8','ボード（切物）']];
-  let ly=H-M-14-Math.ceil(lg.length/2)*18-22; s+=tx(RX, ly, '※A面＝壁の始点→終点を見て左側。破線は連続線の折点。', 'font-size="11" fill="#666"'); ly+=20;
+  let ly=H-M-14-Math.ceil(lg.length/2)*18-22; s+=tx(RX, ly, `※A面＝始点→終点を見て左側。A面は${LV.front?'正面から見た向き':'裏（B面側）から見た向き'}。破線は折点。`, 'font-size="11" fill="#666"'); ly+=20;
   lg.forEach(([cc,t],i)=>{ const x=RX+(i%2)*(RWi/2), yy=ly+Math.floor(i/2)*18; s+=`<rect x="${x}" y="${yy-10}" width="14" height="11" fill="${cc}" stroke="#555" stroke-width=".4"/>`+tx(x+20, yy, t, 'font-size="11.5" fill="#333"'); });
   return s+'</svg>';
 }
@@ -4089,14 +4302,15 @@ function openDevView(opt={}){
   const wno=wallNoMap(); const byPg=new Map(); ws.forEach((m,i)=>{ (byPg.get(m.page)||byPg.set(m.page,[]).get(m.page)).push([m,i]); });
   dlg.innerHTML=`<h3>展開図（割付図） — ${ws.length}壁</h3>
    <div class="dvwrap"><div class="dvidx">${[...byPg].map(([pg,arr])=>`<div class="dvpg">P${pg}<small>${arr.length}壁</small></div>${arr.map(([m,i])=>`<button data-i="${i}"><b>${CIRC(wno.get(m.id))}</b><span>${esc(m.name)}<small>L ${(computeWall(m).Ltot/1000).toFixed(2)}m × H ${m.wall.h}</small></span></button>`).join('')}`).join('')}</div>
-   <div class="dvmain"><div class="dvtop"><button class="mini" id="dvPrev">◀</button><span id="dvPos"></span><button class="mini" id="dvNext">▶</button><div class="segb" id="dvMode"></div><span style="flex:1"></span><button class="mini" id="dvMag" title="シートを拡大／全体表示">🔍 拡大</button><button class="mini" id="dvZoom" title="図面上でこの壁を表示">図面で見る</button><button class="mini" id="dvSvg">SVGをコピー</button><button class="mini pri" id="dvPdf">PDFで保存（全${ws.length}ページ）</button></div>
-   <div id="dvSheet" class="dvsheet"></div></div></div>
+   <div class="dvmain"><div class="dvtop"><button class="mini" id="dvPrev">◀</button><span id="dvPos"></span><button class="mini" id="dvNext">▶</button><div class="segb" id="dvMode"></div><span style="flex:1"></span><button class="mini" id="dvMag" title="シートを拡大／全体表示">🔍 拡大</button><button class="mini" id="dvZoom" title="図面上でこの壁を表示">図面で見る</button><button class="mini" id="dvSvg">SVGをコピー</button><button class="mini" id="dvCut" title="全部の壁のカット寸法を表にして保存">カット寸法CSV</button><button class="mini pri" id="dvPdf">PDFで保存（全${ws.length}ページ）</button></div>
+   <div id="dvCond"></div><div id="dvSheet" class="dvsheet"></div></div></div>
    <div class="acts">${DV.back?'<button class="btn" id="dvBack">← 一括設定に戻る</button>':''}<button class="btn pri" id="bCancel">閉じる</button></div>`;
   const cur=()=>ws[DV.i];
   const render=()=>{ const m=cur(); const c=computeWall(m); const ch=layerChoices(c); if (!ch.some(x=>x[0]===DV.mode)) DV.mode='all';
     $('#dvMode').innerHTML=ch.map(([v,t])=>`<button data-v="${v}" class="${DV.mode===v?'on':''}">${t}</button>`).join('');
     $('#dvMode').querySelectorAll('button').forEach(b=>b.onclick=()=>{ DV.mode=b.dataset.v; render(); });
     $('#dvPos').textContent=`${CIRC(wno.get(m.id))}　${DV.i+1} / ${ws.length}`;
+    $('#dvCond').innerHTML=layPanel(m, ws.length); bindLayPanel($('#dvCond'), m, ws, render);
     $('#dvSheet').innerHTML=sheetSVG(m, wno.get(m.id), wallList().length, DV.mode);
     dlg.querySelectorAll('.dvidx button').forEach(b=>b.classList.toggle('on', +b.dataset.i===DV.i));
     const on=dlg.querySelector('.dvidx button.on'); if (on) on.scrollIntoView({block:'nearest'}); };
@@ -4110,6 +4324,7 @@ function openDevView(opt={}){
   const closeDlg=()=>{ closeModal(); dlg.classList.remove('wide'); dlg.onkeydown=null; };
   $('#dvZoom').onclick=()=>{ const m=cur(); closeDlg(); const f=()=>{ S.sel=m.id; zoomTo(m); refreshList(); }; m.page!==S.page? gotoPage(m.page).then(f) : f(); };
   $('#dvSvg').onclick=async()=>{ const t=$('#dvSheet').innerHTML; try{ await navigator.clipboard.writeText(t); toast('SVGをコピーしました（Illustrator等に貼付可）'); }catch(e){ showText('SVG',t); } };
+  $('#dvCut').onclick=async()=>{ await saveFile(baseName()+'_カット寸法.csv', toCsv(cutRows(ws))); };
   $('#dvPdf').onclick=()=>exportDevPdf(ws, DV.mode, $('#dvPdf'));
   if ($('#dvBack')) $('#dvBack').onclick=()=>openWallBatch({keep:true});
   $('#bCancel').onclick=closeDlg;
@@ -4124,7 +4339,7 @@ async function exportDevPdf(ws, mode, btn){
     for (let i=0;i<ws.length;i++){ busy(`展開図PDFを作成中… ${i+1}/${ws.length}`); const m=ws[i];
       const cv=await svgToCanvas(sheetSVG(m, wno.get(m.id), total, mode), 2); const jpg=await toBlob(cv,'image/jpeg',0.92);
       const img=await pdf.embedJpg(await jpg.arrayBuffer()); const pg=pdf.addPage([1190.55, 841.89]); pg.drawImage(img,{x:0,y:0,width:1190.55,height:841.89}); await new Promise(r=>setTimeout(r,0)); }
-    const bytes=await pdf.save(); busy(''); await saveFile(baseName()+'_展開図_割付図.pdf', new Blob([bytes],{type:'application/pdf'}));
+    const bytes=await pdf.save(); busy(''); await saveFile(baseName()+(mode==='cut'?'_カット寸法表.pdf':'_展開図_割付図.pdf'), new Blob([bytes],{type:'application/pdf'}));
   }catch(e){ console.error(e); busy(''); toast('PDF作成に失敗：'+(e.message||e)); }
   finally{ btn && (btn.disabled=false); }
 }
@@ -4451,7 +4666,7 @@ setTool('dist'); resize(); refreshAll();
 $('#hint').textContent='PDFまたは画像を開いてください（ドラッグ＆ドロップ可）';
 tryResume().catch(e=>{ console.warn('resume',e); busy(''); renderRecentCard(); });
 window.__S=S;
-window.__zk={LOWMEM, TL, tget, tkey, tilesReady, tilesNeeded, visTiles, renderHi, tilesDropFile, tilesErase, PJ, GeoHarvest, extractGeometry, pdfJob, readPdfBytes, crashedBefore, gotoPage, zoomAt, computeWall, wallRow, takeoffWork, wallList, refreshProps, openWallBatch};   // 試験用（test/link.mjs）
+window.__zk={LOWMEM, TL, tget, tkey, tilesReady, tilesNeeded, visTiles, renderHi, tilesDropFile, tilesErase, PJ, GeoHarvest, extractGeometry, pdfJob, readPdfBytes, crashedBefore, gotoPage, zoomAt, computeWall, wallRow, takeoffWork, wallList, refreshProps, openWallBatch, cutList, cutRows, edgeTxt, elevSVG, sheetSVG, openDevView, showElevation, newWallObj, LV};   // 試験用（test/link.mjs）
 })();
 </script>
 </body>
