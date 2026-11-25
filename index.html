@@ -2170,20 +2170,21 @@ function normWall(W){ if (!W) return W; const v=WMAP[W.sys]; if (v && v.base){ W
 // ---- 割付の条件（LGS の建て方・捨て貼り・上貼りの貼り方・端の寸法）。決まった値だけを残す（読み込んだファイルの値も通る） ----
 const ORI_V=['auto','v','h'], LAY_V=['auto','start','end','center','cboard'];
 const LAY_ENUM={arr:['共通','千鳥'], base:['start','center','gap','end'], layMode:LAY_V, fin:['core','auto'], orientLow:ORI_V, orientUp:ORI_V, layLow:LAY_V, layUp:LAY_V, vLow:['bottom','top'], vUp:['bottom','top'], jtLow:['imo','uma'], jtUp:['imo','uma']};
-const LAY_NUM={lgsFirst:1200, firstLow:3030, firstUp:3030, lenLow:3030, lenUp:3030, gapS:1000, gapE:1000, gapT:500, gapB:500};
+const LAY_NUM={jOffX:3030, jOffY:3030, lgsFirst:1200, firstLow:3030, firstUp:3030, lenLow:3030, lenUp:3030, gapS:1000, gapE:1000, gapT:500, gapB:500};
 const LAY_OWN=['gapS','gapE','lgsFirst'];   // 壁ごとの値（ほかの壁へ写さない）
 const LAY_KEYS=['pitch','orient','lens','opEdge','opClr',...Object.keys(LAY_ENUM),...Object.keys(LAY_NUM)];
 function normLay(W){
   for (const k in LAY_ENUM) if (W[k]!==undefined && !LAY_ENUM[k].includes(W[k])) delete W[k];
   for (const k in LAY_NUM) if (W[k]!==undefined){ const v=Math.round(+W[k]); if (v>0 && v<=LAY_NUM[k]) W[k]=v; else delete W[k]; }
   return W; }
+const finOf=W=>W.fin||'auto';   // 端の標準は「取り合いの壁厚を引く」（2026-11-26 ユーザーの決定。壁芯までにするときは fin:'core' を持つ）
 const layOf=(W,up)=>{ const t=up?'Up':'Low'; const L={start:W['lay'+t]||'', first:W['first'+t]||0, v:W['v'+t]||'', jt:W['jt'+t]||'', len:W['len'+t]||0}; L.set=!!((L.start&&L.start!=='auto')||L.first||L.v||L.jt); return L; };
 const LGS_BASE={start:'始点から',end:'終点から',center:'中央（柱芯を真ん中）',gap:'中央（柱と柱の間を真ん中）'};
 const LAY_JP={auto:'自動（ロス最小）',start:'始点から',end:'終点から',center:'中央（目地を真ん中）',cboard:'中央（ボードを真ん中）'};
 const sideName=k=>k.replace(/^A/,'A面 ').replace(/^B/,'B面 ').replace('下張','捨て貼り').replace('上張','上貼り');
 const oriJP=o=>o==='v'?'縦張り':'横張り';
 function layTxt(W, up){ const L=layOf(W,up), o=W[up?'orientUp':'orientLow']||W.orient||'auto';
-  return [o==='auto'?'':oriJP(o), LAY_JP[L.start||W.layMode||'auto'], L.first?'1枚目 '+L.first:'', L.v==='bottom'?'下から':L.v==='top'?'上から':'', L.jt==='imo'?'通し目地':L.jt==='uma'?'千鳥目地':'', L.len?'定尺 '+L.len:''].filter(Boolean).join('・'); }
+  return [o==='auto'?'':oriJP(o), LAY_JP[L.start||W.layMode||'auto'], L.first?'1枚目 '+L.first:'', L.v==='bottom'?'下から':L.v==='top'?'上から':'', L.jt==='imo'?'通し目地':L.jt==='uma'?'千鳥目地':'', L.len?'定尺 '+L.len:'', up&&(W.jOffX||W.jOffY)? '目地ずらし'+(W.jOffX?' 縦'+W.jOffX:'')+(W.jOffY?' 横'+W.jOffY:'') : ''].filter(Boolean).join('・'); }
 function lgsTxt(W, c){ return `${c.arr}@${c.pitch}　${LGS_BASE[W.base||'start']}${W.lgsFirst?`・1本目 ${W.lgsFirst}`:''}`; }
 const baseSysId = id => (WMAP[id]&&WMAP[id].base) || id;
 const certUrl = w => YG_PDF + encodeURIComponent(w.cert);
@@ -2249,7 +2250,7 @@ function layoutSeg(g, y0, y1, ops, P, out){
   // P:{orient,bw,bl,shift,fromTop,stagger}　g:{a,b,ca,cb,i}（a,b＝張る範囲、ca,cb＝壁芯での範囲）
   const along = P.orient==='v'? P.bw : P.bl;          // 横方向の1枚幅
   const rowH  = P.orient==='v'? P.bl : P.bw;          // 縦方向の1枚高さ
-  const mkRows=top=>{ const r=[]; if (!top){ for (let y=y0; y<y1-1; y+=rowH) r.push([y,Math.min(y+rowH,y1)]); } else { for (let y=y1; y>y0+1; y-=rowH) r.push([Math.max(y0,y-rowH),y]); } return r; };
+  const mkRows=top=>{ const r=[]; if (P.ys!=null){ const ys=((P.ys%rowH)+rowH)%rowH; for (let y=y0+ys-(ys?rowH:0); y<y1-1; y+=rowH) if (Math.min(y+rowH,y1)-Math.max(y,y0)>=1) r.push([Math.max(y,y0),Math.min(y+rowH,y1)]); return r; } if (!top){ for (let y=y0; y<y1-1; y+=rowH) r.push([y,Math.min(y+rowH,y1)]); } else { for (let y=y1; y>y0+1; y-=rowH) r.push([Math.max(y0,y-rowH),y]); } return r; };
   const gops=ops.filter(o=>o.e>g.ca && o.s<g.cb);
   const put=(xa,xb,ya,yb)=>{ if (xb-xa<1) return;
     let inside=false, area=(xb-xa)*(yb-ya), notch=false;
@@ -2272,7 +2273,7 @@ function ffd(items, cap){ const bins=[]; for (const it of items.sort((a,b)=>b-a)
 function estimateSheets(list, orient, bw, bl){
   const A=[], Bw=[]; let restArea=0;
   for (const p of list){ const len = orient==='v'? p.h : p.w, wid = orient==='v'? p.w : p.h;
-    if (wid>=bw-1) A.push(len); else if (len>=bl-1) Bw.push(wid); else restArea+=len*wid; }
+    if (wid>bw/2) A.push(len); else if (len>bl/2) Bw.push(wid); else restArea+=len*wid; }   // 定尺の半分より大きい切り物は、同じ向きに並べて詰める（1枚から取れる物を2枚と数えない）
   return ffd(A,bl) + ffd(Bw,bw) + Math.ceil(restArea/(bw*bl)/0.8 - 1e-9);
 }
 function jointsX(list, segs){ const xs=new Set(); for (const p of list) for (const x of [p.x,p.x+p.w]) if (!segs.some(g=>Math.abs(x-g.a)<1||Math.abs(x-g.b)<1)) xs.add(Math.round(x)); return [...xs]; }
@@ -2292,7 +2293,10 @@ function optimizeLayer({segs,y0,y1,ops,B,W,lay,sideStuds,lower,mustOnStud,pref,u
       const onStuds=()=>[...new Set(sideStuds.filter(x=>x>=g.a-1&&x<=g.b+1).map(x=>Math.round(((x-g.a)%period+period)%period)))];
       // 片押し・中央振分け：ボードの目地位置を基準端から決める（上張は下張と重ならないよう半枚ずらしも候補）
       const forced = mode==='start'? 0 : mode==='end'? (Lg%along0) : mode==='center'? ((Lg/2)%along0) : mode==='cboard'? md(Lg/2-along0/2) : null;
-      if (pick){   // この層の貼り方を選んだとき：そのとおりに張る。目地がスタッドの外・下張と重なるときだけ、1枚目を切ってずらす
+      const lp= lower && !mustOnStud && lower.P[segs.indexOf(g)];
+      const jx= lp && W.jOffX? (()=>{ const la=lp.orient==='v'? lp.bw : lp.bl; return Math.round(md(((lp.shift%la)+la)%la + W.jOffX)); })() : null;
+      if (jx!=null) shifts=[jx];   // 縦目地のずらし寸法を決めたとき：捨て貼りの1本目の目地から、その寸法だけずらす
+      else if (pick){   // この層の貼り方を選んだとき：そのとおりに張る。目地がスタッドの外・下張と重なるときだけ、1枚目を切ってずらす
         const f=Math.min(lay.first, along0);
         const ex= f&&mode==='end'? md(Lg-f) : f&&(mode==='start'||mode==='auto')? md(f) : Math.round(forced||0);
         shifts=[{s:ex}];
@@ -2303,20 +2307,23 @@ function optimizeLayer({segs,y0,y1,ops,B,W,lay,sideStuds,lower,mustOnStud,pref,u
       else { shifts=[]; for (let s=0; s<period; s+=50) shifts.push(s); }
       let segBest=null;
       const tops= lay.v==='bottom'? [false] : lay.v==='top'? [true] : [false,true];
+      // 横目地のずらし寸法を決めたとき：捨て貼りの1本目の横目地から、その寸法だけ上に上貼りの横目地を置く
+      const ysv= lp && W.jOffY? (()=>{ const rh=lp.orient==='v'? lp.bl : lp.bw; const yj= lp.fromTop? y1-rh : y0+rh; return yj+W.jOffY-y0; })() : null;
       const half=Math.round(bl/2/50)*50, near=mustOnStud? nearestStudStagger(bl, sideStuds, g) : half;
       const stags= orient==='v'? (lay.jt==='uma'? [1] : [0]) : lay.jt==='imo'? [0] : lay.jt==='uma'? [near>0? near : half] : [0, near];
       for (const sh of shifts) for (const fromTop of tops) for (const stagger of stags){
         const shift= typeof sh==='number'? sh : sh.s, alt= typeof sh!=='number' && sh.alt;
         if (orient==='h' && stagger && mustOnStud && stagger<0) continue;
-        const P={orient,bw,bl,shift,fromTop,stagger}; const L=[]; layoutSeg(g,y0,y1,ops,P,L);
+        const P={orient,bw,bl,shift,fromTop,stagger}; if (ysv!=null) P.ys=ysv; const L=[]; layoutSeg(g,y0,y1,ops,P,L);
         const gx=jointsX(L,[g]);
         if (mustOnStud && orient==='h' && stagger && !lay.jt){ // 千鳥目地もスタッド上
           if (!gx.every(x=>sideStuds.some(s=>Math.abs(s-x)<TOL))) continue; }
         let pen=0, off=0, cy=false;
         if (mustOnStud){ off=gx.filter(x=>!sideStuds.some(s=>Math.abs(s-x)<TOL)).length; pen+=off*1e7; }   // 下張の縦目地はスタッド上
         if (lower){ const lw=lower.list.filter(p=>p.si===g.i);
-          if (tooClose(gx, jointsX(lw,[g]))) pen+=1e9;     // 上張と下張の縦目地は100mm以上ずらす
-          if (tooClose(jointsY(L,y0,y1), jointsY(lw,y0,y1))){ pen+=1e8; cy=true; } }        // 横目地も重ねない
+          const dX=W.jOffX? Math.min(100,W.jOffX) : 100, dY=W.jOffY? Math.min(100,W.jOffY) : 100;
+          if (tooClose(gx, jointsX(lw,[g]), dX)) pen+=1e9;     // 上張と下張の縦目地は100mm以上ずらす
+          if (tooClose(jointsY(L,y0,y1), jointsY(lw,y0,y1), dY)){ pen+=1e8; cy=true; } }        // 横目地も重ねない
         // 開口キワ：開口の縦の縁・上下の縁から clr 以内に目地を作らない（角からのひび割れ防止。L型に切り欠く）
         let edge=0; if (W.opEdge!==false && ops.length){ const clr=+W.opClr||100;
           for (const o of ops){ if (o.e<g.a||o.s>g.b) continue; const top=(+o.sill||0)+ +o.h, sill=+o.sill||0;
@@ -2379,7 +2386,12 @@ function edgeTxt(c, key){ const {parts}=cutList(c,key); const u=f=>[...new Set(p
   const one=(n,f)=>{ const v=u(f); return v.length? `${n} ${v.slice(0,3).join('/')}${v.length>3?'…':''}` : ''; };
   return [one('始点',[p=>p.S&&p.si===i0&&p.wc,p=>R(p.w)]), one('終点',[p=>p.E&&p.si===i1&&p.wc,p=>R(p.w)]), one('高さ',[p=>p.T&&p.B&&p.hc,p=>R(p.h)]), one('上端',[p=>p.T&&!p.B&&p.hc,p=>R(p.h)]), one('下端',[p=>p.B&&!p.T&&p.hc,p=>R(p.h)])].filter(Boolean).join('・')||'切り物なし'; }
 // 端の寸法：取り合う壁の厚みから、A面・B面それぞれの「張る範囲」を出す（＋は短く、−は長く。mm）
-function autoTrim(m){
+// 取り合いの計算は、そのページの壁（形・壁種・高さの有無）が変わったときだけやり直す（描き直しのたびに全部の壁を見ない）
+let _pgSig=new Map(), _pgSigT=0; const _trimMemo=new Map();
+function pageSig(pg){ let v=_pgSig.get(pg); if (v!=null) return v; if (!_pgSigT){ _pgSigT=1; setTimeout(()=>{ _pgSig.clear(); _pgSigT=0; },0); }
+  v=JSON.stringify(lineMeasAll().filter(q=>q.page===pg).map(q=>[q.id, q.pts, q.arcs||0, q.wall? [baseSysId(q.wall.sys||''), q.wall.opt||'', +q.wall.h>0] : 0])); _pgSig.set(pg,v); return v; }
+function autoTrim(m){ const k=m.id+'|'+pageSig(m.page); if (_trimMemo.has(k)) return _trimMemo.get(k); if (_trimMemo.size>3000) _trimMemo.clear(); const v=autoTrim0(m); _trimMemo.set(k,v); return v; }
+function autoTrim0(m){
   const k=mmPer(m.page); if (!k) return null; const P=pathPts(m), M=m.pts, n=M.length; if (P.length<2||n<2) return null;
   const T0=q=>{ const s=wallSys(q); return s&&s.t||100; }, A=Array.from({length:n-1},()=>({a:0,b:0})), B=Array.from({length:n-1},()=>({a:0,b:0})), clamp=v=>Math.max(-300,Math.min(300,v)); let found=0;
   // 自分の折れ点：内側は短く、外側は長く
@@ -2449,7 +2461,7 @@ function wallSys(m){ if (!m.wall) return null; normWall(m.wall); const W=m.wall;
 const WRULE=(()=>{ try{ return Object.assign({minDed:0.5}, JSON.parse(localStorage.getItem('pdfmeasure:wallrule')||'{}')); }catch(e){ return {minDed:0.5}; } })();
 function setWallRule(v){ WRULE.minDed=v; try{ localStorage.setItem('pdfmeasure:wallrule', JSON.stringify(WRULE)); }catch(e){} refreshList(); drawOv(); if (S.sel) refreshProps(); }
 function computeWall(m){
-  const tr= m.wall && m.wall.fin==='auto'? autoTrim(m) : null;
+  const tr= m.wall && finOf(m.wall)==='auto'? autoTrim(m) : null;
   const key=JSON.stringify([m.pts,m.wall,m.arcs,mmPer(m.page),WRULE.minDed,tr]); const ch=_cwCache.get(m); if (ch&&ch.key===key) return ch.val;
   const val=computeWall0(m, tr); _cwCache.set(m,{key,val}); return val;
 }
@@ -2826,7 +2838,7 @@ function layPanel(m, others){
       return `<div><b>${k[0]}面</b> ${oriJP(L.orient)} ${L.bw}×${L.bl}　${L.sheets}枚　ロス${(L.loss*100).toFixed(0)}%　<span class="cutv">${esc(edgeTxt(c,k))}</span>${L.alt?'　<span class="mut">（目地を逃がすため1枚目を切る）</span>':''}${w?`　<span class="warn">⚠ ${w}</span>`:''}</div>`; }).join('');
     return `<div class="lcr"><h4>${up?'上貼り':'捨て貼り'}<small>${esc(B.n.replace(/^タイガー/,''))}</small></h4><div class="lcf">
       <label>向き ${opt('orient'+t, ori, W['orient'+t]||W.orient||'auto')}</label><label>割付 ${opt('lay'+t, lay, W['lay'+t]||W.layMode||'auto')}</label><label title="割付の始まりの端から1枚目の寸法。空欄は成り行き">1枚目 ${num('first'+t,'成り行き')}mm</label>
-      <label>上下 ${opt('v'+t, vv, W['v'+t]||'')}</label><label>目地 ${opt('jt'+t, jj, W['jt'+t]||'')}</label><label>定尺 ${opt('len'+t, [['','自動'],...lens.map(l=>[String(l),String(l)])], W['len'+t]||'')}</label></div><div class="lcs">${st}</div></div>`; };
+      <label>上下 ${opt('v'+t, vv, W['v'+t]||'')}</label><label>目地 ${opt('jt'+t, jj, W['jt'+t]||'')}</label>${up? `<label title="捨て貼りの目地から上貼りの目地までの寸法。空欄は自動（100mm以上ずらす）">目地ずらし 縦 ${num('jOffX','自動')}</label><label>横 ${num('jOffY','自動')}mm</label>` : ''}<label>定尺 ${opt('len'+t, [['','自動'],...lens.map(l=>[String(l),String(l)])], W['len'+t]||'')}</label></div><div class="lcs">${st}</div></div>`; };
   const canArr=!sys || sys.arr==='共通' || sys.arr==='千鳥';
   return `<details class="laycond" ${LV.open?'open':''}><summary>割付の条件 <span class="mut">LGS：${esc(lgsTxt(W,c))}${sys&&c.layers.length?`／捨て貼り：${esc(layTxt(W,false))}${sys.layersPerSide>1?`／上貼り：${esc(layTxt(W,true))}`:''}`:''}</span></summary>
    ${c.arr==='なし'? '<div class="pmini">この壁種はスタッドを立てないため、割付の条件はありません。</div>' : `<div class="lcr"><h4>LGS<small>${esc(c.st&&c.st.stud||'')}</small></h4><div class="lcf">
@@ -2834,8 +2846,8 @@ function layPanel(m, others){
       <label>割付 ${opt('base', Object.entries(LGS_BASE), W.base||'start')}</label><label title="割付の始まりの端から1本目（端のスタッドの次）までの寸法。中央割付では使いません">1本目 ${num('lgsFirst','成り行き',1200)}mm</label></div>
       <div class="lcs">スタッド ${c.studs.length}本${sys&&c.arr!==sys.arr?'　<span class="warn">⚠ 壁種（認定）の建て方と違います</span>':''}</div></div><datalist id="lcPitch"><option value="227"></option><option value="303"></option><option value="455"></option><option value="606"></option></datalist>`}
    ${sys&&c.layers.length? row(false)+(sys.layersPerSide>1? row(true) : '') : sys? '' : '<div class="pmini">壁仕様を選ぶと、捨て貼り・上貼りの貼り方を選べます。</div>'}
-   <div class="lcr"><h4>キワ<small>端の寸法</small></h4><div class="lcf"><label title="取り合いの壁を引く：このページで計測した壁との取り合いを見て、相手の壁厚の分だけ張る範囲を変えます">端 ${opt('fin', [['core','壁芯まで'],['auto','取り合いの壁厚を引く']], W.fin||'core')}</label><label>逃げ 始点 ${num('gapS','0',1000)}</label><label>終点 ${num('gapE','0',1000)}</label><label>上 ${num('gapT','0',500)}</label><label>下 ${num('gapB','0',500)}mm</label></div>
-      <div class="lcs">${W.fin==='auto'? (c.trim&&c.trim.found? `<span class="mut">${esc(trimTxt(c))}（出隅・入隅の勝ち負け＝ボード厚の差は引いていません）</span>` : '<span class="warn">⚠ 取り合う壁が見つかりません（壁芯までで出しています）。柱・躯体との取り合いは「逃げ」に入れてください</span>') : '<span class="warn">キワの寸法は壁芯までの長さです。実際のカット寸法にするには「取り合いの壁厚を引く」か「逃げ」を使ってください</span>'}</div></div>
+   <div class="lcr"><h4>キワ<small>端の寸法</small></h4><div class="lcf"><label title="取り合いの壁を引く：このページで計測した壁との取り合いを見て、相手の壁厚の分だけ張る範囲を変えます">端 ${opt('fin', [['auto','取り合いの壁厚を引く'],['core','壁芯まで']], finOf(W))}</label><label>逃げ 始点 ${num('gapS','0',1000)}</label><label>終点 ${num('gapE','0',1000)}</label><label>上 ${num('gapT','0',500)}</label><label>下 ${num('gapB','0',500)}mm</label></div>
+      <div class="lcs">${finOf(W)==='auto'? (c.trim&&c.trim.found? `<span class="mut">${esc(trimTxt(c))}（出隅・入隅の勝ち負け＝ボード厚の差は引いていません）</span>` : '<span class="warn">⚠ 取り合う壁が見つかりません（壁芯までで出しています）。柱・躯体との取り合いは「逃げ」に入れてください</span>') : '<span class="warn">キワの寸法は壁芯までの長さです。実際のカット寸法にするには「取り合いの壁厚を引く」か「逃げ」を使ってください</span>'}</div></div>
    <div class="lcb"><label class="chk"><input type="checkbox" data-lv="front" ${LV.front?'checked':''}> A面を正面から見た向きで描く（始点が右）</label><span style="flex:1"></span><button class="mini" data-la="reset">自動に戻す</button>${others>1?`<button class="mini pri" data-la="all">全${others}壁とこれから描く壁に同じ条件</button>`:''}</div></details>`;
 }
 function trimTxt(c){ const n=c.segs.length-1, f=v=>(v>=0?'−':'＋')+Math.abs(Math.round(v)); const t=c.trim; return `始点 A面 ${f(t.A[0].a)}・B面 ${f(t.B[0].a)}／終点 A面 ${f(t.A[n].b)}・B面 ${f(t.B[n].b)}mm`; }
@@ -2850,7 +2862,7 @@ function bindLayPanel(root, m, ws, after){
     if (k==='pitch') W.pitch= v===''? '' : +v; else if (k==='base') W.base=v;
     else if (v===''||v==='0') delete W[k]; else W[k]= LAY_NUM[k]? Math.round(+v) : v;
     if (k.startsWith('orient') && W.orient){ const o=W.orient; delete W.orient; for (const z of ['orientLow','orientUp']) if (z!==k && !W[z]) W[z]=o; }
-    if (k==='fin' && v==='core') delete W.fin;
+    if (k==='fin' && v==='auto') delete W.fin;
     normLay(W); done(); });
   det.querySelectorAll('[data-lv]').forEach(el=>el.onchange=()=>{ LV[el.dataset.lv]=el.checked; saveLV(); after(); });
   det.querySelectorAll('[data-la]').forEach(b=>b.onclick=()=>{ pushUndo();
@@ -4282,7 +4294,7 @@ function sheetSVG(m, no, total, mode){
     for (const l of c.layers){ const L=c.boards[l]; s+=tx(RX, y, `${sideName(l)} ${L.board.n.replace(/^タイガー/,'').replace(/ボード・?/,'')} ${L.bw}×${L.bl}`, 'font-size="12"')+tx(RX+RWi, y, `${L.orient==='v'?'縦':'横'} ${L.sheets}枚 ロス${(L.loss*100).toFixed(0)}%`, 'text-anchor="end" font-size="12"'); y+=17; } }
   if (c.layers.length){ const W0=m.wall; y+=6; s+=tx(RX, y, '割付の条件', 'font-weight="bold" font-size="13"'); y+=17;
     for (const [k,v] of [['LGS',lgsTxt(W0,c)],['捨て貼り',layTxt(W0,false)],...(c.layers.some(l=>l.includes('上'))?[['上貼り',layTxt(W0,true)]]:[])]){ s+=tx(RX, y, k, 'font-size="11.5" fill="#666"')+tx(RX+58, y, v, `font-size="${v.length>30?9.5:11.5}" fill="#111"`); y+=16; }
-    y+=6; s+=tx(RX, y, 'キワのカット寸法', 'font-weight="bold" font-size="13" fill="#c01818"')+tx(RX+RWi, y, W0.fin==='auto'? (c.trim&&c.trim.found?'取り合いの壁厚を引いた寸法':'取り合う壁なし（壁芯まで）') : (W0.gapS||W0.gapE)? '壁芯から逃げを引いた寸法' : '壁芯までの寸法', `font-size="11" text-anchor="end" fill="${W0.fin==='auto'&&c.trim&&c.trim.found?'#555':'#c01818'}"`); y+=17;
+    y+=6; s+=tx(RX, y, 'キワのカット寸法', 'font-weight="bold" font-size="13" fill="#c01818"')+tx(RX+RWi, y, finOf(W0)==='auto'? (c.trim&&c.trim.found?'取り合いの壁厚を引いた寸法':'取り合う壁なし（壁芯まで）') : (W0.gapS||W0.gapE)? '壁芯から逃げを引いた寸法' : '壁芯までの寸法', `font-size="11" text-anchor="end" fill="${W0.fin==='auto'&&c.trim&&c.trim.found?'#555':'#c01818'}"`); y+=17;
     for (const l of c.layers){ const t=edgeTxt(c,l); s+=tx(RX, y, sideName(l), 'font-size="11.5" fill="#666"')+tx(RX+84, y, t, `font-size="${t.length>34?9.5:11.5}" font-weight="bold" fill="#111"`); y+=16; } }
   const nOp=Math.max(1, Math.min(10, Math.floor((H-M-14-3*18-22-20-y-40)/17)));
   if (c.ops.length){ y+=8; s+=tx(RX, y, '開口', 'font-weight="bold" font-size="13"'); y+=18;

@@ -13,10 +13,22 @@ let id=1; const wall=(pts,w)=>({id:id++,page:1,kind:pts.length>2?'poly':'dist',n
 const L=5460, one=w=>Z.computeWall(wall([[0,0],[L,0]],w)); const near=(a,b,t=1)=>Math.abs(a-b)<=t;
 const rowX=(c,k,f)=>Z.cutList(c,k).parts.filter(f).sort((a,b)=>a.x-b.x).map(p=>Math.round(p.w));
 
-// ---- 選んでいない壁は前と同じ（2026-11-25 の版の枚数） ----
-for (const [sys,len,lo,up] of [['a2k',3000,'v606x1820:8','v910x2730:4'],['a2k',5460,'h606x1820:14','v910x2730:6'],['s12w',7850,'h910x1820:14','v910x2730:9'],['f-s12',5460,'v910x2730:6','h910x1820:10'],['sw1',7850,'h606x1820:21','v606x1820:20']]){
-  const c=Z.computeWall(wall([[0,0],[len,0]],{sys,h:2700})), t=k=>{ const b=c.boards[k]; return `${b.orient}${b.bw}x${b.bl}:${b.sheets}`; };
-  ok(t('A下張')===lo && t('A上張')===up, `条件を選んでいない ${sys} L${len} は前の版と同じ（${t('A下張')}／${t('A上張')}）`); }
+// ---- 枚数の見積もり：1枚の定尺から取れる切り物は1枚と数える（2026-11-26 から） ----
+{ const c=Z.computeWall(wall([[0,0],[5402,0]],{sys:'f-s12',h:2700,orientLow:'v',lens:[2730]})); ok(c.boards['A下張'].sheets===6, '縦張り 910×2730 で幅5402：910×5＋852 の6枚（852×2700 を2枚と数えない）'); }
+{ const c=Z.computeWall(wall([[0,0],[5460,0]],{sys:'f-s12',h:2700,orientLow:'v',lens:[2730]})); ok(c.boards['A下張'].sheets===6, '縦張り 910×2730 で幅5460：6枚'); }
+// 取り合う壁がない直線の壁は、端の標準（取り合いの壁厚を引く）でも壁芯までと同じ
+for (const [sys,len] of [['a2k',3000],['a2k',5460],['s12w',7850],['f-s12',5460],['sw1',7850]]){
+  const t=c=>c.layers.map(k=>{ const b=c.boards[k]; return `${b.orient}${b.bw}x${b.bl}:${b.sheets}`; }).join();
+  const a=Z.computeWall(wall([[0,0],[len,0]],{sys,h:2700})), b=Z.computeWall(wall([[0,0],[len,0]],{sys,h:2700,fin:'core'}));
+  ok(t(a)===t(b), `取り合いのない ${sys} L${len}：標準と「壁芯まで」が同じ（${t(a)}）`); }
+
+// ---- 目地ずらし（上貼りの目地を、捨て貼りの目地から決めた寸法だけずらす） ----
+{ const c=Z.computeWall(wall([[0,0],[5460,0]],{sys:'f-s12',h:2700,orientLow:'v',layLow:'start',orientUp:'v',jOffX:303})); const lo=rowX(c,'A下張',p=>p.T), up=rowX(c,'A上張',p=>p.T);
+  ok(lo[0]===910 && up[0]===303 && up[1]===910, `縦目地ずらし 303：捨て貼りの目地 910 に対し、上貼りの目地は 303・1213…（上貼り ${up.slice(0,3).join('・')}）`); ok(!c.boards['A上張'].conflict, '303 ずらすと縦目地は重ならない'); }
+{ const c=Z.computeWall(wall([[0,0],[5460,0]],{sys:'f-s12',h:2700,orientLow:'h',layLow:'start',lenLow:1820,vLow:'bottom',orientUp:'h',lenUp:1820,jOffY:455})); const ys=Z.cutList(c,'A上張').parts.filter(p=>p.x<1).map(p=>Math.round(p.y)).sort((a,b)=>a-b);
+  ok(ys.includes(910+455) && ys.includes(455), `横目地ずらし 455：捨て貼りの横目地 910 に対し、上貼りの横目地は 455・1365…（${ys.join('・')}）`); }
+{ const c=Z.computeWall(wall([[0,0],[5460,0]],{sys:'f-s12',h:2700,orientLow:'v',layLow:'start',orientUp:'v',jOffX:40})); ok(c.boards['A上張'].conflict===false && rowX(c,'A上張',p=>p.T)[0]===40, '40mm のように小さいずらしも、決めたとおりに張る'); }
+{ const c=Z.computeWall(wall([[0,0],[5460,0]],{sys:'f-s12',h:2700,orientLow:'v',layLow:'start',orientUp:'v',jOffX:910})); ok(c.boards['A上張'].conflict===true, 'ずらし 910（目地が重なる）は ⚠ を出す'); }
 
 // ---- LGS ----
 const xs=c=>c.studs.filter(s=>s.kind==='reg').map(s=>Math.round(s.x));
@@ -66,7 +78,7 @@ ok(miss===0, `切り寸法を全部足すと、張る面積と合う（150壁・
 // ---- 端の寸法（取り合いの壁厚を引く） ----
 { const a=wall([[0,0],[5000,0]],{sys:'f-s12',h:2700,fin:'auto'}), L1=wall([[0,0],[0,3000]],{sys:'a2k',h:2700}), T1=wall([[5000,-2000],[5000,2000]],{sys:'a2k',h:2700}); S.meas[1]=[a,L1,T1]; const c=Z.computeWall(a), f=k=>c.boards[k].fs[0];
   ok(near(f('B下張').a,68)&&near(f('A下張').a,-68), 'L形：内側（B面）は136/2＝68短く、外側（A面）は68長い'); ok(near(f('A下張').b,4932)&&near(f('B下張').b,4932), 'T形：両面とも68短い'); ok(near(c.area,5000*2700), '壁面積は変えない（芯々のまま）');
-  delete a.wall.fin; ok(near(Z.computeWall(a).boards['A下張'].fs[0].a,0), '「壁芯まで」に戻すと元の長さ'); a.wall.gapS=50; ok(near(Z.computeWall(a).boards['A下張'].fs[0].a,50)&&near(Z.computeWall(a).studs[0].x,50), '逃げ 始点50：ボードも LGS も50から');
+  a.wall.fin='core'; ok(near(Z.computeWall(a).boards['A下張'].fs[0].a,0), '「壁芯まで」を選ぶと元の長さ'); delete a.wall.fin; ok(near(Z.computeWall(a).boards['B下張'].fs[0].a,68), '何も選ばない壁は、取り合いの壁厚を引く（標準）'); a.wall.fin='core'; a.wall.gapS=50; ok(near(Z.computeWall(a).boards['A下張'].fs[0].a,50)&&near(Z.computeWall(a).studs[0].x,50), '逃げ 始点50：ボードも LGS も50から');
   // 図面の向きが逆でも、A面・B面が入れ替わるだけ
   const r=wall([[5000,0],[0,0]],{sys:'f-s12',h:2700,fin:'auto'}); S.meas[1]=[r,L1,T1]; const cr=Z.computeWall(r); ok(near(cr.boards['A下張'].fs[0].b,4932)&&near(cr.boards['B下張'].fs[0].b,5068)&&near(cr.boards['A下張'].fs[0].a,68), '逆向きに測っても、内側・外側を取り違えない');
   const short=wall([[68,9000],[3000,9000]],{sys:'f-s12',h:2700,fin:'auto'}), T2=wall([[0,8000],[0,10000]],{sys:'a2k',h:2700}); S.meas[1]=[short,T2]; ok(near(Z.computeWall(short).boards['A下張'].fs[0].a,0), '相手の壁の面まで測った壁は、二重に引かない');
@@ -81,7 +93,7 @@ ok(miss===0, `切り寸法を全部足すと、張る面積と合う（150壁・
 const A=wall([[0,0],[5460,0]],{sys:'f-s12',h:2700,openings:[{mark:'SD-1',s:1000,w:900,h:2000}]}), B=wall([[0,4000],[3000,4000]],{sys:'a2k',h:2700,gapS:20}); S.meas[1]=[A,B]; errs.length=0;
 const $=q=>d.querySelector(q);
 Z.openDevView({}); await sleep(20); const set=(k,v)=>{ const e=$(`.laycond [data-lk="${k}"]`); e.value=v; e.onchange(); };
-ok(['arr','pitch','base','lgsFirst','orientLow','layLow','firstLow','vLow','jtLow','lenLow','orientUp','layUp','firstUp','vUp','jtUp','lenUp','fin','gapS','gapE','gapT','gapB'].every(k=>$(`.laycond [data-lk="${k}"]`)), '展開図に LGS・捨て貼り・上貼り・キワの選択が出る');
+ok(['jOffX','jOffY','arr','pitch','base','lgsFirst','orientLow','layLow','firstLow','vLow','jtLow','lenLow','orientUp','layUp','firstUp','vUp','jtUp','lenUp','fin','gapS','gapE','gapT','gapB'].every(k=>$(`.laycond [data-lk="${k}"]`)), '展開図に LGS・捨て貼り・上貼り・キワの選択が出る');
 set('orientLow','v'); set('layLow','start'); set('orientUp','h'); set('layUp','end'); set('base','end'); set('gapE','30');
 ok(A.wall.orientLow==='v'&&A.wall.layLow==='start'&&A.wall.orientUp==='h'&&A.wall.layUp==='end'&&A.wall.base==='end'&&A.wall.gapE===30, '選ぶと壁に入る');
 ok(/捨て貼り/.test($('#dvSheet').textContent) && /キワのカット寸法/.test($('#dvSheet').textContent), '展開図にキワのカット寸法と割付の条件が載る');
