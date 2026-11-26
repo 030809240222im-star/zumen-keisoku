@@ -384,7 +384,11 @@ table.wb .dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin
 table.wb tr.sub td{text-align:right!important} table.wb tr.sub td:nth-child(2){text-align:left!important}
 .mini.pri{background:var(--accent);color:#1a1405;border-color:var(--accent);font-weight:600}
 table.ceq td:nth-child(4){text-align:right;font-family:var(--mono)} table.ceq td{white-space:nowrap} table.ceqn td:last-child{text-align:right;white-space:nowrap;font-family:var(--mono)} table.ceq td:nth-child(3){white-space:normal}
-.laycond{border:1px solid var(--line);border-radius:6px;margin-bottom:6px;font-size:12px;max-height:40vh;overflow:auto} .laycond summary{cursor:pointer;padding:6px 10px;font-weight:600} .laycond summary .mut{font-weight:400;margin-left:6px}
+.laycond{border:1px solid var(--line);border-radius:6px;margin-bottom:6px;font-size:12px;max-height:32vh;overflow:auto}
+.elwrap{display:grid;grid-template-columns:minmax(300px,380px) minmax(0,1fr);gap:10px;flex:1;min-height:0}
+.elwrap>#eCond{min-height:0;overflow:auto} .elwrap .laycond{max-height:none;margin:0} .elwrap .lcr{grid-template-columns:1fr} .elwrap .lcr h4{grid-row:auto} .elwrap .laycond summary .mut{display:none}
+.elmain{display:flex;flex-direction:column;min-height:0;min-width:0;overflow:auto} .elmain .esvg{flex:none;height:max(320px,calc(94vh - 190px));max-height:none}
+@media (max-width:1100px){ .elwrap{grid-template-columns:1fr;overflow:auto} .elwrap>#eCond{overflow:visible} .elwrap .laycond{max-height:32vh} .elwrap .laycond summary .mut{display:inline} .elmain{overflow:visible} .elmain .esvg{height:max(300px,calc(100dvh - 32vh - 230px))} } .laycond summary{cursor:pointer;padding:6px 10px;font-weight:600} .laycond summary .mut{font-weight:400;margin-left:6px}
 .lcr{display:grid;grid-template-columns:104px 1fr;gap:2px 8px;padding:5px 10px;border-top:1px solid var(--line)} .lcr h4{margin:4px 0 0;font-size:13px;grid-row:span 2} .lcr h4 small{display:block;font-weight:400;color:var(--muted);font-size:10.5px}
 .lcf{display:flex;flex-wrap:wrap;gap:4px 12px} .lcf label{display:flex;gap:4px;align-items:center;color:var(--muted)} .lcf select,.lcf .inp{height:28px;background:var(--bg);border:1px solid var(--line);border-radius:5px;color:var(--text);width:auto;max-width:190px} .lcf select{-webkit-appearance:none;appearance:none;padding:0 22px 0 8px;background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23999' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 7px center} .lcf .inp{width:88px}
 .lcs{color:var(--muted);font-size:11.5px} .lcs .cutv{color:#ff9d7a;font-family:var(--mono)} .lcb{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 10px;border-top:1px solid var(--line)} .lcb .chk{display:flex;gap:6px;align-items:center}
@@ -2888,12 +2892,9 @@ function showElevation(m){
   const dlg=$('#dlg'); dlg.classList.add('wide');
   dlg.innerHTML=`<h3>割付図 — ${esc(m.name)} ${c.sys?`／${esc(c.sys.name)}`:''}</h3>
    <p class="sub">L=${fmtMm(c.Ltot)}　H=${c.H.toLocaleString()}mm${c.st&&c.st.stud?`　スタッド${c.st.stud}`:''}　※A面＝壁の始点→終点を見て左側</p>
-   <div id="eCond"></div>
-   <div class="tabs etabs" id="eTabs"></div>
-   <div id="esvg" class="esvg"></div>
-   <div id="eqty"></div>
+   <div class="elwrap"><div id="eCond"></div><div class="elmain"><div class="tabs etabs" id="eTabs"></div><div id="esvg" class="esvg"></div><div id="eqty"></div></div></div>
    <div class="acts"><button class="btn" id="eCopyQ">数量表をコピー</button><button class="btn" id="eCopyC">カット寸法をコピー</button><button class="btn" id="eCopyS">SVGをコピー</button><button class="btn pri" id="bCancel">閉じる</button></div>`;
-  let q; const draw=()=>{ $('#esvg').innerHTML=elevSVG(c, elevState.layer, elevState.zoom, {mir:LV.front&&elevState.layer[0]==='A'}); };
+  let q; const draw=()=>{ const bx=$('#esvg'); $('#esvg').innerHTML=elevSVG(c, elevState.layer, elevState.zoom, {mir:LV.front&&elevState.layer[0]==='A', fitW:bx.clientWidth-6, fitH:bx.clientHeight-6}); };
   const render=()=>{ c=computeWall(m); if (elevState.layer!=='下地' && !c.boards[elevState.layer]) elevState.layer='下地';
     const ws=wallList(); $('#eCond').innerHTML=layPanel(m, ws.length); bindLayPanel($('#eCond'), m, ws, render);
     $('#eTabs').innerHTML=['下地',...c.layers].map(l=>`<button data-l="${l}" class="${elevState.layer===l?'on':''}">${l==='下地'?'下地（LGS）':sideName(l)+`（${c.boards[l].orient==='v'?'縦':'横'} ${c.boards[l].bl}／ロス${(c.boards[l].loss*100).toFixed(0)}%）`}</button>`).join('')+'<span style="margin-left:auto;display:flex;gap:4px;align-items:center"><button class="mini" id="eZo">－</button><button class="mini" id="eZi">＋</button></span>';
@@ -2904,8 +2905,9 @@ function showElevation(m){
   $('#eCopyQ').onclick=async()=>{ try{ await navigator.clipboard.writeText(q.tsv); toast('数量表をコピーしました（Excelに貼付可）'); }catch(e){ showText('数量表',q.tsv); } };
   $('#eCopyC').onclick=async()=>{ const t=cutRows([m]).map(r=>r.join('\t')).join('\n'); try{ await navigator.clipboard.writeText(t); toast('カット寸法をコピーしました（Excelに貼付可）'); }catch(e){ showText('カット寸法',t); } };
   $('#eCopyS').onclick=async()=>{ const s=$('#esvg').innerHTML; try{ await navigator.clipboard.writeText(s); toast('SVGをコピーしました（Illustrator等に貼付可）'); }catch(e){ showText('SVG',s); } };
-  $('#bCancel').onclick=()=>{ closeModal(); dlg.classList.remove('wide'); };
-  render(); $('#modal').classList.add('show');
+  const onRs=()=>{ if (document.body.contains($('#esvg'))) draw(); else removeEventListener('resize', onRs); }; addEventListener('resize', onRs);
+  $('#bCancel').onclick=()=>{ closeModal(); dlg.classList.remove('wide'); removeEventListener('resize', onRs); };
+  $('#modal').classList.add('show'); render();   // 枠の大きさが決まってから描く
 }
 function elevSVG(c, layer, zoom, o){
   o=o||{}; const BL= layer!=='下地' && c.boards[layer] || null, mir=!!o.mir;
@@ -2913,8 +2915,13 @@ function elevSVG(c, layer, zoom, o){
   const shift=[]; let total=c.Ltot; { let acc=0; c.segs.forEach((g,i)=>{ const f=BL&&BL.fs.find(z=>z.i===i); const ea=f?Math.max(0,g.a-f.a):0, eb=f?Math.max(0,f.b-g.b):0; shift[i]=acc+ea; acc+=ea+eb; }); total+=acc; }
   let padL=70, padT=70, padB=BL?84:70, padR=BL?56:30, sc;
   if (o.compact){ padL=44; padT=34; padB=BL?54:48; padR=BL?50:44; sc=Math.max(0.005, Math.min((o.h-padT-padB)/c.H, (o.w-padL-padR)/total)); }
+  else if (o.fitH>200 && o.fitW>200) sc=Math.max(0.005, Math.min((o.fitH-padT-padB)/c.H, (o.fitW-padL-padR)/total))*zoom;   // 割付図：枠いっぱいに壁全体
   else { const availH=Math.max(260, Math.min(520, innerHeight*0.5)); sc=(availH/ c.H)*zoom; }
-  const Wpx=total*sc, Hpx=c.H*sc; const W=Wpx+padL+padR, Ht=Hpx+padT+padB;
+  // 凡例（1段に収まるよう、図の幅を凡例の長さまで広げる）
+  const LG=[['#1f77d4','スタッド（A面側）'],['#2ca02c','スタッド（B面側）'],['#333','端部・コーナー'],['#d62728','開口補強（縦枠・まぐさ/窓台）']];
+  const legend=(c.arr==='千鳥'? LG.slice() : [['#1f77d4','スタッド'],LG[2],LG[3]]); if (layer!=='下地') legend.push(['#e3edf8','ボード（定尺）'],['#fde6c8','ボード（切物）']);
+  const legW= o.compact? 0 : padL+legend.reduce((a,[,t])=>a+16+t.length*11+14,0);
+  const Wpx=total*sc, Hpx=c.H*sc; const W=Math.max(Wpx+padL+padR, legW), Ht=Hpx+padT+padB;
   const siOf=x=>{ for (let i=0;i<c.segs.length;i++) if (x<=c.segs[i].b+0.5) return i; return c.segs.length-1; };
   const X=(x,i)=>{ const u=x+shift[i==null? siOf(x) : i]; return padL+(mir? total-u : u)*sc; }, RX=(x,w,i)=> mir? X(x+w,i) : X(x,i), Y=y=>padT+Hpx-y*sc, X0=padL, X1=padL+Wpx;
   const opI=p=>siOf((p.s+p.e)/2);
@@ -2983,10 +2990,8 @@ function elevSVG(c, layer, zoom, o){
   const xl=padL-30; s+=`<line x1="${xl}" y1="${Y(0)}" x2="${xl}" y2="${Y(c.H)}" stroke="#444"/><line x1="${xl-5}" y1="${Y(0)}" x2="${xl+5}" y2="${Y(0)}" stroke="#444"/><line x1="${xl-5}" y1="${Y(c.H)}" x2="${xl+5}" y2="${Y(c.H)}" stroke="#444"/><text x="${xl-6}" y="${(Y(0)+Y(c.H))/2}" text-anchor="middle" transform="rotate(-90 ${xl-6} ${(Y(0)+Y(c.H))/2})" fill="#222">H=${c.H.toLocaleString()}</text>`;
   if (!BL) for (const y of c.sway) s+=`<text x="${X1+4}" y="${Y(y)+4}" font-size="9" fill="#777">振れ止め</text>`;
   // legend
-  const lg=[['#1f77d4','スタッド（A面側）'],['#2ca02c','スタッド（B面側）'],['#333','端部・コーナー'],['#d62728','開口補強（縦枠・まぐさ/窓台）'],['#999','—']];
-  let lx=padL; const ly=16; const legend=(c.arr==='千鳥'? lg.slice(0,4) : [['#1f77d4','スタッド'],lg[2],lg[3]]);
-  if (layer!=='下地') legend.push(['#e3edf8','ボード（定尺）'],['#fde6c8','ボード（切物）']);
-  if (!o.compact) for (const [cc,t] of legend){ s+=`<rect x="${lx}" y="${ly-9}" width="12" height="10" fill="${cc}" stroke="#555" stroke-width=".4"/><text x="${lx+16}" y="${ly}" fill="#333">${t}</text>`; lx+=16+t.length*11+14; }
+  let lx=padL, ly=16;
+  if (!o.compact) for (const [cc,t] of legend){ if (lx>padL && lx+16+t.length*11>W-4){ lx=padL; ly+=16; } s+=`<rect x="${lx}" y="${ly-9}" width="12" height="10" fill="${cc}" stroke="#555" stroke-width=".4"/><text x="${lx+16}" y="${ly}" fill="#333">${t}</text>`; lx+=16+t.length*11+14; }
   s+='</svg>'; return s;
 }
 function quantities(c, m){

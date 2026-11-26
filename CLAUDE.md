@@ -9,7 +9,7 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - `index.html` … アプリ本体（HTML・CSS・JavaScript をこの1ファイルに収めている）。**ここが正本**。
 - `cmaps-ja.json` … 日本語PDFの文字を読むための CMap（base64）。通常は触らない。
 - `lib/` … pdf.js 3.11.174（`pdf.min.js`・`pdf.worker.min.js`）、pdf-lib 1.17.1、日本語以外の CMap（`cmaps/`）。npm の公式パッケージから取り出し、CDN と同じ中身であることを確かめた物。**外の CDN からは読まない**（Claude 上など lib/ が無いときだけ、改ざん検査 SRI 付きで CDN を使う）。版を変えるときは `index.html` の `LIBS` の `sri` を作り直す（`test/security.mjs` が一致を確かめる）。
-- `sw.js` … オフライン起動用 Service Worker。**index.html を変えたら `VER` の番号を1つ上げる**（例 zumen-v15 → zumen-v16）。
+- `sw.js` … オフライン起動用 Service Worker。**index.html を変えたら `VER` の番号を1つ上げる**（例 zumen-v16 → zumen-v17）。
 - `manifest.webmanifest` / `icon-*.png` / `apple-touch-icon.png` … ホーム画面追加（PWA）用。
 - `admin.html` … 利用者（メールアドレス）の管理の画面。Cloudflare Pages の `/admin`。データは必ず `textContent` で出す（innerHTML に入れない）。
 - `functions/` … Cloudflare Pages Functions。

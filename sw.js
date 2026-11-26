@@ -3,7 +3,7 @@
 // ・電波が弱いときは 3.5 秒で保存済みのアプリから起動し、裏で最新版を取り込む
 // ・Cloudflare Access のログイン画面（リダイレクト）は保存しない。?fresh= 付きで開いたとき（ログインし直し）は保存版を使わない
 // ・PDFライブラリはアプリと同じ場所（lib/）のものを保存する（CDN は Claude 上などの予備）
-const VER='zumen-v15';
+const VER='zumen-v16';
 const SCOPE=new URL('./', self.location).href;
 const CORE=['./','./index.html','./cmaps-ja.json','./manifest.webmanifest','./icon-192.png','./icon-512.png','./apple-touch-icon.png','./lib/pdf.min.js','./lib/pdf.worker.min.js','./lib/pdf-lib.min.js'].map(u=>new URL(u, SCOPE).href);
 const LIBS=['https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
