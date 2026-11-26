@@ -104,5 +104,15 @@ ok(Z.cutRows([A,B]).length>8 && Z.cutRows([A,B])[0].includes('幅(mm)'), 'カッ
 $('[data-la="reset"]').click(); await sleep(10); ok(!A.wall.layLow&&!A.wall.gapE&&A.wall.base==='start', '「自動に戻す」');
 $('#bCancel').click(); Z.showElevation(A); await sleep(10); ok($('#eCond .laycond')&&$('.cutq'), '割付図にも条件とカット寸法の表が出る'); set('layUp','center'); ok(A.wall.layUp==='center'&&$('.cutq'), '割付図で選んでも効く');
 $('#bCancel').click(); S.sel=A.id; Z.refreshProps(); await sleep(20); ok($('#pLay').value==='__mix', '壁の設定欄：捨て貼り・上貼りで違うときは「別々」と出る'); $('#pLay').value='start'; $('#pLay').onchange({target:$('#pLay')}); ok(A.wall.layMode==='start'&&!A.wall.layUp, '設定欄でまとめて選ぶと両方に効く');
+// ---- 捨て貼りと上貼りを重ねた割付図・目地ずらしの寸法 ----
+{ const w0=wall([[0,0],[5460,0]],{sys:'f-s12',h:2700,orientLow:'v',layLow:'start',orientUp:'v',jOffX:303,openings:[]}); S.meas[1]=[w0]; const c=Z.computeWall(w0), J=Z.jointOffsets(c,'A');
+  ok(J.minV===303 && J.v.length>0 && J.v.every(j=>j.d===303||j.d===607), `縦目地ずらし 303 を入れると、重ねた図の寸法も 303（最小 ${J.minV}）`);
+  w0.wall.jOffX=40; const J2=Z.jointOffsets(Z.computeWall(w0),'A'); ok(J2.minV===40 && J2.few>0, 'ずらし 40 は 100 未満として数える（赤で出す）');
+  const sv=Z.elevSVG(Z.computeWall(w0),'A重ね',1,{}); ok(/stroke-dasharray="7 4"/.test(sv) && />40</.test(sv) && !/NaN|undefined/.test(sv), '重ねた図：捨て貼りは破線、上貼りは実線、ずらし寸法を書く');
+  ok(!/NaN|undefined/.test(Z.elevSVG(Z.computeWall(w0),'A重ね',1,{mir:true})), '正面から見た向き（左右反転）でも描ける');
+  const sh=Z.sheetSVG(w0,1,1,'A'); ok(/A面 重ね/.test(sh) && /目地ずらし/.test(sh), '展開図の「A面」のページに重ねた図が入る');
+  delete w0.wall.jOffX; w0.wall.orientLow='h'; w0.wall.lenLow=1820; w0.wall.lenUp=1820; w0.wall.openings=[{mark:'SD-1',s:1200,w:900,h:2100}]; const J3=Z.jointOffsets(Z.computeWall(w0),'A');
+  ok(J3.h.length>0 && J3.v.every(j=>j.d<=910), `捨て貼り横張り・開口あり：横目地のずらしも出し、板の幅より遠い目地は書かない（縦 ${J3.minV}・横 ${J3.minH}）`);
+  Z.showElevation(w0); await sleep(10); ok($('.etabs [data-l="A重ね"]') && $('.etabs [data-l="B重ね"]'), '割付図に「A面 重ね」「B面 重ね」のタブが出る'); $('.etabs [data-l="A重ね"]').click(); await sleep(10); ok(/stroke-dasharray="7 4"/.test($('#esvg').innerHTML), 'タブを押すと重ねた図が出る'); $('#bCancel').click(); }
 ok(!errs.length, '画面の操作でエラーが出ない'+(errs.length?'（'+errs[0]+'）':''));
 console.log(bad? `\n${bad}件 不合格` : '\nすべて合格'); process.exit(bad?1:0);

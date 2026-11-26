@@ -2843,7 +2843,8 @@ function layPanel(m, others){
   const ori=[['auto','自動（ロス最小）'],['v','縦張り'],['h','横張り']], lay=Object.entries(LAY_JP), vv=[['','自動'],['bottom','下から'],['top','上から']], jj=[['','自動'],['imo','通し目地（いも）'],['uma','千鳥目地']];
   const row=(up)=>{ const t=up?'Up':'Low', bk=up? (W.upBoard||sys.up) : (W.lowBoard||sys.low), B=BOARDS[bk]||BOARDS[up?sys.up:sys.low], lens=B.lens||[1820,2420,2730,3030];
     const ks=c.layers.filter(k=>k.includes('上')===up); const st=ks.map(k=>{ const L=c.boards[k], thin=cutList(c,k).parts.filter(p=>p.cut&&Math.min(p.w,p.h)<100), w=[thin.length? `100mm未満の細い切り物 ${thin.length}枚` : '', L.offStud? `スタッド外の目地 ${L.offStud}` : '', L.conflict?'縦目地が捨て貼りと重なる':'', L.ycf?'横目地が捨て貼りと重なる':'', L.edge? `開口キワの目地 ${L.edge}` : ''].filter(Boolean).join('・');
-      return `<div><b>${k[0]}面</b> ${oriJP(L.orient)} ${L.bw}×${L.bl}　${L.sheets}枚　ロス${(L.loss*100).toFixed(0)}%　<span class="cutv">${esc(edgeTxt(c,k))}</span>${L.alt?'　<span class="mut">（目地を逃がすため1枚目を切る）</span>':''}${w?`　<span class="warn">⚠ ${w}</span>`:''}</div>`; }).join('');
+      const J= up? jointOffsets(c,k[0]) : null;
+      return `<div><b>${k[0]}面</b> ${oriJP(L.orient)} ${L.bw}×${L.bl}　${L.sheets}枚　ロス${(L.loss*100).toFixed(0)}%　<span class="cutv">${esc(edgeTxt(c,k))}</span>${J? `　<span class="${J.few?'warn':'mut'}">目地ずらし ${esc(ovTxt(J))}${J.few?`（100未満 ${J.few}か所）`:''}</span>` : ''}${L.alt?'　<span class="mut">（目地を逃がすため1枚目を切る）</span>':''}${w?`　<span class="warn">⚠ ${w}</span>`:''}</div>`; }).join('');
     return `<div class="lcr"><h4>${up?'上貼り':'捨て貼り'}<small>${esc(B.n.replace(/^タイガー/,''))}</small></h4><div class="lcf">
       <label>向き ${opt('orient'+t, ori, W['orient'+t]||W.orient||'auto')}</label><label>割付 ${opt('lay'+t, lay, W['lay'+t]||W.layMode||'auto')}</label><label title="割付の始まりの端から1枚目の寸法。空欄は成り行き">1枚目 ${num('first'+t,'成り行き')}mm</label>
       <label>上下 ${opt('v'+t, vv, W['v'+t]||'')}</label><label>目地 ${opt('jt'+t, jj, W['jt'+t]||'')}</label>${up? `<label title="捨て貼りの目地から上貼りの目地までの寸法。空欄は自動（100mm以上ずらす）">目地ずらし 縦 ${num('jOffX','自動')}</label><label>横 ${num('jOffY','自動')}mm</label>` : ''}<label>定尺 ${opt('len'+t, [['','自動'],...lens.map(l=>[String(l),String(l)])], W['len'+t]||'')}</label></div><div class="lcs">${st}</div></div>`; };
@@ -2880,6 +2881,23 @@ function bindLayPanel(root, m, ws, after){
     const D={}; for (const k of keys) if (src[k]!==undefined && src[k]!=='') D[k]=src[k]; S.wallDef.lay=D; S.wallDef.base=src.base||'start'; S.wallDef.layMode=src.layMode||'auto'; saveWallDef();
     done(); toast(`${n}壁に同じ条件を入れました（「逃げ 始点・終点」と「1本目」は壁ごとのまま）`); });
 }
+const ovKey=sd=>sd+'重ね', isOv=l=>/^[AB]重ね$/.test(l||'');
+const ovPair=(c,sd)=>{ const lo=c.boards[sd+'下張'], up=c.boards[sd+'上張']; return lo&&up? {lo,up} : null; };
+function jointOffsets(c, sd){
+  const P=ovPair(c,sd); if (!P) return null; const fsOf=si=>P.up.fs.find(f=>f.i===si);
+  const segs=(list, vert)=>{ const M=new Map();
+    for (const p of list){ const g=fsOf(p.si); if (!g) continue;
+      const es= vert? [[p.x,p.y,p.y+p.h],[p.x+p.w,p.y,p.y+p.h]] : [[p.y,p.x,p.x+p.w],[p.y+p.h,p.x,p.x+p.w]];
+      for (const [v,a,b] of es){ if (vert? (Math.abs(v-g.a)<1||Math.abs(v-g.b)<1) : (v<P.up.y0+1||v>P.up.y1-1)) continue; const k=p.si+'|'+Math.round(v); (M.get(k)||M.set(k,{v:Math.round(v),si:p.si,r:[]}).get(k)).r.push([a,b]); } }
+    // 同じ線の上で続いている所はつなぐ
+    const out=[]; for (const o of M.values()){ o.r.sort((x,y)=>x[0]-y[0]); let cur=null; for (const [a,b] of o.r){ if (cur && a<=cur[1]+1) cur[1]=Math.max(cur[1],b); else { if (cur) out.push({v:o.v,si:o.si,a:cur[0],b:cur[1]}); cur=[a,b]; } } if (cur) out.push({v:o.v,si:o.si,a:cur[0],b:cur[1]}); }
+    return out; };
+  const far=Math.max(P.up.bw, P.lo.bw);
+  const pair=(U,L)=>U.flatMap(u=>{ const byR=new Map(); for (const l of L){ if (l.si!==u.si) continue; const a=Math.max(u.a,l.a), b=Math.min(u.b,l.b); if (b-a<=1) continue; const d=Math.abs(u.v-l.v); if (d>far) continue; const k=Math.round(a)+'|'+Math.round(b), o=byR.get(k); if (!o||d<o.d) byR.set(k,{...u, lv:l.v, d, ma:a, mb:b}); } return [...byR.values()]; });
+  const v=pair(segs(P.up.list,true), segs(P.lo.list,true)), h=pair(segs(P.up.list,false), segs(P.lo.list,false)), all=[...v,...h];
+  return {v, h, min: all.length? Math.min(...all.map(x=>x.d)) : null, minV: v.length? Math.min(...v.map(x=>x.d)) : null, minH: h.length? Math.min(...h.map(x=>x.d)) : null, few: all.filter(x=>x.d<100).length};
+}
+const ovTxt=J=>!J? '' : [J.minV!=null? `縦目地 最小 ${J.minV}` : '', J.minH!=null? `横目地 最小 ${J.minH}` : ''].filter(Boolean).join('・')||'重なる目地なし';
 function cutTableHtml(c){
   if (!c.layers.length) return '';
   return `<h4 style="margin:12px 0 2px">キワ・カット寸法（幅×高さ mm）</h4><table class="qty cutq"><tr><th>層</th><th>場所</th><th>幅×高さ</th><th>枚</th><th>切り欠き</th></tr>${c.layers.map(k=>cutList(c,k).rows.map((r,i)=>`<tr${i===0?' class="first"':''}><td>${i===0?esc(sideName(k)):''}</td><td>${esc(r.where)}</td><td><b>${r.w}×${r.h}</b></td><td>${r.n}</td><td>${esc(r.note)}</td></tr>`).join('')).join('')}</table>`;
@@ -2894,10 +2912,10 @@ function showElevation(m){
    <p class="sub">L=${fmtMm(c.Ltot)}　H=${c.H.toLocaleString()}mm${c.st&&c.st.stud?`　スタッド${c.st.stud}`:''}　※A面＝壁の始点→終点を見て左側</p>
    <div class="elwrap"><div id="eCond"></div><div class="elmain"><div class="tabs etabs" id="eTabs"></div><div id="esvg" class="esvg"></div><div id="eqty"></div></div></div>
    <div class="acts"><button class="btn" id="eCopyQ">数量表をコピー</button><button class="btn" id="eCopyC">カット寸法をコピー</button><button class="btn" id="eCopyS">SVGをコピー</button><button class="btn pri" id="bCancel">閉じる</button></div>`;
-  let q; const draw=()=>{ const bx=$('#esvg'); $('#esvg').innerHTML=elevSVG(c, elevState.layer, elevState.zoom, {mir:LV.front&&elevState.layer[0]==='A', fitW:bx.clientWidth-6, fitH:bx.clientHeight-6}); };
-  const render=()=>{ c=computeWall(m); if (elevState.layer!=='下地' && !c.boards[elevState.layer]) elevState.layer='下地';
+  let q; const draw=()=>{ const bx=$('#esvg'); if (innerWidth>1100){ const mh=bx.parentElement.clientHeight-$('#eTabs').offsetHeight-12; if (mh>320) bx.style.height=mh+'px'; } else bx.style.height=''; $('#esvg').innerHTML=elevSVG(c, elevState.layer, elevState.zoom, {mir:LV.front&&elevState.layer[0]==='A', fitW:bx.clientWidth-6, fitH:bx.clientHeight-6}); };
+  const render=()=>{ c=computeWall(m); if (elevState.layer!=='下地' && !c.boards[elevState.layer] && !(isOv(elevState.layer) && ovPair(c, elevState.layer[0]))) elevState.layer='下地';
     const ws=wallList(); $('#eCond').innerHTML=layPanel(m, ws.length); bindLayPanel($('#eCond'), m, ws, render);
-    $('#eTabs').innerHTML=['下地',...c.layers].map(l=>`<button data-l="${l}" class="${elevState.layer===l?'on':''}">${l==='下地'?'下地（LGS）':sideName(l)+`（${c.boards[l].orient==='v'?'縦':'横'} ${c.boards[l].bl}／ロス${(c.boards[l].loss*100).toFixed(0)}%）`}</button>`).join('')+'<span style="margin-left:auto;display:flex;gap:4px;align-items:center"><button class="mini" id="eZo">－</button><button class="mini" id="eZi">＋</button></span>';
+    $('#eTabs').innerHTML=['下地',...c.layers,...['A','B'].filter(sd=>ovPair(c,sd)).map(ovKey)].map(l=>`<button data-l="${l}" class="${elevState.layer===l?'on':''}">${l==='下地'?'下地（LGS）':isOv(l)? (J=>`${l[0]}面 重ね（ずらし ${[J.minV,J.minH].filter(v=>v!=null).join('/')||'—'}）`)(jointOffsets(c,l[0])) :sideName(l)+`（${c.boards[l].orient==='v'?'縦':'横'} ${c.boards[l].bl}／ロス${(c.boards[l].loss*100).toFixed(0)}%）`}</button>`).join('')+'<span style="margin-left:auto;display:flex;gap:4px;align-items:center"><button class="mini" id="eZo">－</button><button class="mini" id="eZi">＋</button></span>';
     dlg.querySelectorAll('.etabs [data-l]').forEach(b=>b.onclick=()=>{ elevState.layer=b.dataset.l; dlg.querySelectorAll('.etabs [data-l]').forEach(x=>x.classList.toggle('on',x===b)); draw(); });
     $('#eZo').onclick=()=>{ elevState.zoom=Math.max(0.25,elevState.zoom/1.4); draw(); };
     $('#eZi').onclick=()=>{ elevState.zoom=Math.min(8,elevState.zoom*1.4); draw(); };
@@ -2910,7 +2928,7 @@ function showElevation(m){
   $('#modal').classList.add('show'); render();   // 枠の大きさが決まってから描く
 }
 function elevSVG(c, layer, zoom, o){
-  o=o||{}; const BL= layer!=='下地' && c.boards[layer] || null, mir=!!o.mir;
+  o=o||{}; const OV= isOv(layer)? ovPair(c, layer[0]) : null, BL= OV? OV.up : layer!=='下地' && c.boards[layer] || null, mir=!!o.mir;
   // 折れ点の外側は、張る範囲が壁芯より長い。その分だけ横にずらして描く
   const shift=[]; let total=c.Ltot; { let acc=0; c.segs.forEach((g,i)=>{ const f=BL&&BL.fs.find(z=>z.i===i); const ea=f?Math.max(0,g.a-f.a):0, eb=f?Math.max(0,f.b-g.b):0; shift[i]=acc+ea; acc+=ea+eb; }); total+=acc; }
   let padL=70, padT=70, padB=BL?84:70, padR=BL?56:30, sc;
@@ -2919,9 +2937,9 @@ function elevSVG(c, layer, zoom, o){
   else { const availH=Math.max(260, Math.min(520, innerHeight*0.5)); sc=(availH/ c.H)*zoom; }
   // 凡例（1段に収まるよう、図の幅を凡例の長さまで広げる）
   const LG=[['#1f77d4','スタッド（A面側）'],['#2ca02c','スタッド（B面側）'],['#333','端部・コーナー'],['#d62728','開口補強（縦枠・まぐさ/窓台）']];
-  const legend=(c.arr==='千鳥'? LG.slice() : [['#1f77d4','スタッド'],LG[2],LG[3]]); if (layer!=='下地') legend.push(['#e3edf8','ボード（定尺）'],['#fde6c8','ボード（切物）']);
+  const legend=(c.arr==='千鳥'? LG.slice() : [['#1f77d4','スタッド'],LG[2],LG[3]]); if (OV) legend.push(['#fff3e0','捨て貼り（破線）'],['#ffffff','上貼り（実線）'],['#a3159a','目地ずらし'],['#d62728','100未満']); else if (layer!=='下地') legend.push(['#e3edf8','ボード（定尺）'],['#fde6c8','ボード（切物）']);
   const legW= o.compact? 0 : padL+legend.reduce((a,[,t])=>a+16+t.length*11+14,0);
-  const Wpx=total*sc, Hpx=c.H*sc; const W=Math.max(Wpx+padL+padR, legW), Ht=Hpx+padT+padB;
+  const Wpx=total*sc, Hpx=c.H*sc; const W=Math.max(Wpx+padL+padR, o.fitW>200? Math.min(legW, o.fitW) : legW), Ht=Hpx+padT+padB;
   const siOf=x=>{ for (let i=0;i<c.segs.length;i++) if (x<=c.segs[i].b+0.5) return i; return c.segs.length-1; };
   const X=(x,i)=>{ const u=x+shift[i==null? siOf(x) : i]; return padL+(mir? total-u : u)*sc; }, RX=(x,w,i)=> mir? X(x+w,i) : X(x,i), Y=y=>padT+Hpx-y*sc, X0=padL, X1=padL+Wpx;
   const opI=p=>siOf((p.s+p.e)/2);
@@ -2931,7 +2949,8 @@ function elevSVG(c, layer, zoom, o){
   s+=`<rect x="${X0}" y="${Y(c.H)}" width="${Wpx}" height="${Hpx}" fill="#f7f7f5" stroke="#333" stroke-width="1.2"/>`;
   const rh=Math.max(2,40*sc); s+=`<rect x="${X0}" y="${Y(c.H)}" width="${Wpx}" height="${rh}" fill="#9aa7b4"/><rect x="${X0}" y="${Y(0)-rh}" width="${Wpx}" height="${rh}" fill="#9aa7b4"/>`;
   c.segs.forEach((g,i)=>{ if (i) s+=`<line x1="${X(g.a,i)}" y1="${Y(c.H)-14}" x2="${X(g.a,i)}" y2="${Y(0)+14}" stroke="#555" stroke-dasharray="6 4"/>`; });
-  const boardSvg = BL? BL.list.map(b=>`<rect x="${RX(b.x,b.w,b.si)}" y="${Y(b.y+b.h)}" width="${b.w*sc}" height="${b.h*sc}" fill="${b.cut?'#fde6c8':'#e3edf8'}" fill-opacity=".72" stroke="#1d4f86" stroke-width="1.4"/>`).join('') : '';
+  const boardSvg = OV? OV.lo.list.map(b=>`<rect x="${RX(b.x,b.w,b.si)}" y="${Y(b.y+b.h)}" width="${b.w*sc}" height="${b.h*sc}" fill="#fff3e0" fill-opacity=".55" stroke="#d9822b" stroke-width="1.3" stroke-dasharray="7 4"/>`).join('')+OV.up.list.map(b=>`<rect x="${RX(b.x,b.w,b.si)}" y="${Y(b.y+b.h)}" width="${b.w*sc}" height="${b.h*sc}" fill="none" stroke="#1d4f86" stroke-width="1.6"/>`).join('')
+    : BL? BL.list.map(b=>`<rect x="${RX(b.x,b.w,b.si)}" y="${Y(b.y+b.h)}" width="${b.w*sc}" height="${b.h*sc}" fill="${b.cut?'#fde6c8':'#e3edf8'}" fill-opacity=".72" stroke="#1d4f86" stroke-width="1.4"/>`).join('') : '';
   // sway
   for (const y of c.sway) s+=`<line x1="${X0}" y1="${Y(y)}" x2="${X1}" y2="${Y(y)}" stroke="#7a7a7a" stroke-dasharray="3 3"/>`;
   // studs
@@ -2942,7 +2961,7 @@ function elevSVG(c, layer, zoom, o){
   s+=boardSvg;
   // openings
   // 開口キワに残った縦目地を赤い破線で示す
-  if (BL && BL.edge){ const W=(c.wallRef||{}); const clr=+W.opClr||100; const jx=jointsX(BL.list, BL.fs);
+  if (BL && !OV && BL.edge){ const W=(c.wallRef||{}); const clr=+W.opClr||100; const jx=jointsX(BL.list, BL.fs);
     for (const o of c.ops) for (const x of jx) if (Math.abs(x-o.s)<clr || Math.abs(x-o.e)<clr) s+=`<line x1="${X(x)}" y1="${Y(c.H)}" x2="${X(x)}" y2="${Y(0)}" stroke="#d62728" stroke-width="2" stroke-dasharray="6 4"/><text x="${X(x)+3}" y="${Y(c.H)+12}" font-size="10" fill="#d62728">キワ目地</text>`; }
   for (const o of c.ops){ const y0=+o.sill||0, y1=y0+ +o.h, oi=opI(o), ox=RX(o.s,o.e-o.s,oi), ow=(o.e-o.s)*sc; s+=`<rect x="${ox}" y="${Y(y1)}" width="${ow}" height="${(y1-y0)*sc}" fill="#fff" stroke="#d62728" stroke-width="1.5"/>`;
     s+=`<line x1="${ox}" y1="${Y(y1)}" x2="${ox+ow}" y2="${Y(y0)}" stroke="#d62728" stroke-width=".6"/><line x1="${ox+ow}" y1="${Y(y1)}" x2="${ox}" y2="${Y(y0)}" stroke="#d62728" stroke-width=".6"/>`;
@@ -2956,7 +2975,17 @@ function elevSVG(c, layer, zoom, o){
     for (const g of gr){ const tx=g.n>1? g.v+'×'+g.n : String(g.v); let fz=10; while (fz>7 && tx.length*fz*0.58>g.b-g.a-1) fz-=0.5; if (tx.length*fz*0.58>g.b-g.a+3) continue; t+=`<text x="${(g.a+g.b)/2}" y="${yy-4}" text-anchor="middle" font-size="${fz}" fill="${g.red?'#c01818':'#333'}" ${g.red?'font-weight="bold"':''}>${tx}</text>`; }
     return t; };
   const yd=padT-(o.compact?12:26);
-  if (BL){
+  if (OV){
+    // 目地ずらしの寸法（上貼りの目地 → 一番近い捨て貼りの目地。100mm 未満は赤）
+    const J=jointOffsets(c, layer[0]), fz=o.compact?9:11, col=d=>d<100?'#d62728':'#a3159a';
+    for (const j of J.v){ const xu=X(j.v,j.si), xl=X(j.lv,j.si), y=Y((j.ma+j.mb)/2), a=Math.min(xu,xl), b=Math.max(xu,xl), cl=col(j.d);
+      s+=`<line x1="${a}" y1="${y}" x2="${b}" y2="${y}" stroke="${cl}" stroke-width="1.2"/><line x1="${a}" y1="${y-4}" x2="${a}" y2="${y+4}" stroke="${cl}"/><line x1="${b}" y1="${y-4}" x2="${b}" y2="${y+4}" stroke="${cl}"/>`;
+      s+=`<text x="${(a+b)/2}" y="${y-5}" text-anchor="middle" font-size="${fz}" font-weight="bold" fill="${cl}" stroke="#fff" stroke-width="2.6" paint-order="stroke">${j.d}</text>`; }
+    for (const j of J.h){ const yu=Y(j.v), yl=Y(j.lv), x=RX((j.ma+j.mb)/2,0,j.si), a=Math.min(yu,yl), b=Math.max(yu,yl), cl=col(j.d);
+      s+=`<line x1="${x}" y1="${a}" x2="${x}" y2="${b}" stroke="${cl}" stroke-width="1.2"/><line x1="${x-4}" y1="${a}" x2="${x+4}" y2="${a}" stroke="${cl}"/><line x1="${x-4}" y1="${b}" x2="${x+4}" y2="${b}" stroke="${cl}"/>`;
+      s+=`<text x="${x+5}" y="${(a+b)/2}" dominant-baseline="central" font-size="${fz}" font-weight="bold" fill="${cl}" stroke="#fff" stroke-width="2.6" paint-order="stroke">${j.d}</text>`; }
+    if (!J.v.length && !J.h.length) s+=`<text x="${X0+8}" y="${Y(c.H)+18}" font-size="12" fill="#666">重なる高さ・幅に捨て貼りの目地がありません</text>`;
+  } else if (BL){
     const {parts}=cutList(c, layer), bx=(l)=>l.map(p=>({x:p.x,w:p.w,si:p.si,red:p.wc})).sort((a,b)=>a.si-b.si||a.x-b.x);
     // 切り物の寸法をその場に書く
     const L=BL, put=(cx,cy,w,h,txts,red)=>{ for (const [tx,rot] of txts){ const aw=rot?h:w, ah=rot?w:h; let fz=o.compact?10.5:12; const min=o.compact?7:8; while (fz>min && (tx.length*fz*0.56>aw-2 || fz>ah-1)) fz-=0.5; if (tx.length*fz*0.56>aw || fz>ah+0.5) continue;
@@ -4433,7 +4462,7 @@ const SHEET={W:1587, H:1123};                     // A3横（96dpi）
 function layerChoices(c){ const ch=[['all','全層'],['下地','下地']]; for (const sd of ['A','B']) if (c.layers.some(l=>l[0]===sd)) ch.push([sd, sd+'面']); if (c.layers.length) ch.push(['cut','カット寸法表']); return ch; }
 function sheetLayers(c, mode){
   if (mode==='下地') return ['下地'];
-  if (mode==='A'||mode==='B') return c.layers.filter(l=>l[0]===mode);
+  if (mode==='A'||mode==='B') return [...c.layers.filter(l=>l[0]===mode), ...(ovPair(c,mode)? [ovKey(mode)] : [])];
   return ['下地', ...c.layers];
 }
 function keyPlanSVG(m, x, y, w, h){
@@ -4480,8 +4509,8 @@ function sheetSVG(m, no, total, mode){
       yy+=14; }
     s+=tx(LX, LY+LH-4, `寸法は 幅×高さ（mm）。${left?`ほか ${left}種は「カット寸法CSV」にあります。`:''}`, 'font-size="12" fill="#666"'); }
   layers.forEach((l,i)=>{ const col=i%best.cols, row=Math.floor(i/best.cols); const x=LX+col*(best.pw+gap), y=LY+row*(best.ph+cap+gap);
-    const L=c.boards[l]; const ttl = l==='下地'? `下地（スタッド ${lgsTxt(m.wall,c)}${c.st&&c.st.stud?`・${c.st.stud}`:''}）` : `${sideName(l)} — ${L.board.n.replace(/^タイガー/,'')} ${L.bw}×${L.bl}　${oriJP(L.orient)}　${L.sheets}枚　ロス${(L.loss*100).toFixed(1)}%`;
-    s+=`<rect x="${x}" y="${y}" width="${best.pw}" height="${best.ph+cap}" fill="none" stroke="#ddd"/>`+tx(x+8, y+16, ttl, `font-size="13" font-weight="bold" fill="${l==='下地'?'#333':'#1d4f86'}"`);
+    const L=c.boards[l]; const ttl = isOv(l)? `${l[0]}面 重ね（捨て貼り＝破線・上貼り＝実線）　目地ずらし ${ovTxt(jointOffsets(c,l[0]))}` : l==='下地'? `下地（スタッド ${lgsTxt(m.wall,c)}${c.st&&c.st.stud?`・${c.st.stud}`:''}）` : `${sideName(l)} — ${L.board.n.replace(/^タイガー/,'')} ${L.bw}×${L.bl}　${oriJP(L.orient)}　${L.sheets}枚　ロス${(L.loss*100).toFixed(1)}%`;
+    s+=`<rect x="${x}" y="${y}" width="${best.pw}" height="${best.ph+cap}" fill="none" stroke="#ddd"/>`+tx(x+8, y+16, ttl, `font-size="13" font-weight="bold" fill="${l==='下地'?'#333':isOv(l)?'#a3159a':'#1d4f86'}"`);
     s+=nestSvg(elevSVG(c, l, 1, {compact:true, w:best.pw, h:best.ph, mir:LV.front&&l[0]==='A'}), x, y+cap, best.pw, best.ph); });
   // 右欄：キープラン・データ・材料・開口
   const RX=W-M-RW+12, RWi=RW-24; let y=top+12;
@@ -4878,7 +4907,7 @@ setTool('dist'); resize(); refreshAll();
 $('#hint').textContent='PDFまたは画像を開いてください（ドラッグ＆ドロップ可）';
 tryResume().catch(e=>{ console.warn('resume',e); busy(''); renderRecentCard(); });
 window.__S=S;
-window.__zk={LOWMEM, TL, tget, tkey, tilesReady, tilesNeeded, visTiles, renderHi, tilesDropFile, tilesErase, PJ, GeoHarvest, extractGeometry, pdfJob, readPdfBytes, crashedBefore, gotoPage, zoomAt, computeWall, wallRow, takeoffWork, wallList, refreshProps, openWallBatch, cutList, cutRows, edgeTxt, ceilCalc, ceilTotals, ceilList, openCeilBatch, normCeil, chFromText, elevSVG, sheetSVG, openDevView, showElevation, newWallObj, LV};   // 試験用（test/link.mjs）
+window.__zk={LOWMEM, TL, tget, tkey, tilesReady, tilesNeeded, visTiles, renderHi, tilesDropFile, tilesErase, PJ, GeoHarvest, extractGeometry, pdfJob, readPdfBytes, crashedBefore, gotoPage, zoomAt, computeWall, wallRow, takeoffWork, wallList, refreshProps, openWallBatch, cutList, cutRows, edgeTxt, jointOffsets, ceilCalc, ceilTotals, ceilList, openCeilBatch, normCeil, chFromText, elevSVG, sheetSVG, openDevView, showElevation, newWallObj, LV};   // 試験用（test/link.mjs）
 })();
 </script>
 </body>
