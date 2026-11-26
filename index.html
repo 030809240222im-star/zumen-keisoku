@@ -383,6 +383,7 @@ table.wb .dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin
 .wbtns{display:flex;gap:6px;padding:0 12px 8px;flex:none}.wbtns .mini{flex:1;height:26px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 table.wb tr.sub td{text-align:right!important} table.wb tr.sub td:nth-child(2){text-align:left!important}
 .mini.pri{background:var(--accent);color:#1a1405;border-color:var(--accent);font-weight:600}
+table.ceq td:nth-child(4){text-align:right;font-family:var(--mono)} table.ceq td{white-space:nowrap} table.ceqn td:last-child{text-align:right;white-space:nowrap;font-family:var(--mono)} table.ceq td:nth-child(3){white-space:normal}
 .laycond{border:1px solid var(--line);border-radius:6px;margin-bottom:6px;font-size:12px;max-height:40vh;overflow:auto} .laycond summary{cursor:pointer;padding:6px 10px;font-weight:600} .laycond summary .mut{font-weight:400;margin-left:6px}
 .lcr{display:grid;grid-template-columns:104px 1fr;gap:2px 8px;padding:5px 10px;border-top:1px solid var(--line)} .lcr h4{margin:4px 0 0;font-size:13px;grid-row:span 2} .lcr h4 small{display:block;font-weight:400;color:var(--muted);font-size:10.5px}
 .lcf{display:flex;flex-wrap:wrap;gap:4px 12px} .lcf label{display:flex;gap:4px;align-items:center;color:var(--muted)} .lcf select,.lcf .inp{height:28px;background:var(--bg);border:1px solid var(--line);border-radius:5px;color:var(--text);width:auto;max-width:190px} .lcf select{-webkit-appearance:none;appearance:none;padding:0 22px 0 8px;background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23999' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 7px center} .lcf .inp{width:88px}
@@ -569,7 +570,7 @@ header .grp{border-right:1px solid var(--line)} header .grp:last-child{border-ri
   <section style="padding-bottom:6px">
     <h2><span>計測リスト（このページ）</span><span style="display:flex;gap:4px"><button class="mini" id="bCopy" title="全ページの計測をタブ区切りでコピー（Excelに貼付可）">表をコピー</button><button class="mini" id="bClear" title="このページの計測を全削除">全削除</button></span></h2>
   </section>
-  <div class="wbtns"><button class="mini" id="bWallB" title="複数の線分に高さ・壁仕様を一括設定し、壁面積をまとめて集計">🧱 壁の一括設定・集計</button><button class="mini" id="bDev" title="壁①②③…の割付図を1ページずつ展開図で表示">展開図①②③</button></div>
+  <div class="wbtns"><button class="mini" id="bWallB" title="複数の線分に高さ・壁仕様を一括設定し、壁面積をまとめて集計">🧱 壁の一括設定・集計</button><button class="mini" id="bCeil" title="面積を天井として、天井下地（LGS）とボードの数量を集計">天井の集計</button><button class="mini" id="bDev" title="壁①②③…の割付図を1ページずつ展開図で表示">展開図①②③</button></div>
   <div id="list"></div>
   <div id="props"></div>
   <div class="tot" id="tot"></div>
@@ -710,12 +711,13 @@ function valueOf(m){
     case 'dist': return { main: fmtLen(d2(pts[0],pts[1]), m.page), sub: dxdy(pts[0],pts[1],m.page) };
     case 'poly': if (m.run){ const sg=runSegs(m); return { main: fmtLen(pathLen(m,false), m.page), sub: sg.map(x=>x.arc? 'R'+fmtLen(x.r,m.page).replace(/\s*mm$/,'') : '直線').join(' → ') }; }
       return { main: fmtLen(pathLen(m,false), m.page), sub: (pts.length-1)+' 区間'+(hasArcs(m)?`（円弧${Object.keys(m.arcs).length}）`:'') };
-    case 'area': case 'rect': return { main: fmtArea(shapeArea(m), m.page), sub: '周長 '+fmtLen(pathLen(m,true), m.page)+(hasArcs(m)?` ／ 円弧${Object.keys(m.arcs).length}`:'') };
+    case 'area': case 'rect': return { main: fmtArea(shapeArea(m), m.page), sub: '周長 '+fmtLen(pathLen(m,true), m.page)+(hasArcs(m)?` ／ 円弧${Object.keys(m.arcs).length}`:'')+ceilTag(m) };
     case 'arc': { const A=arcInfo(m); return A? { main:'R '+fmtLen(A.r,m.page), sub:'弧長 '+fmtLen(A.len,m.page)+' ／ '+(Math.abs(A.sweep)*180/Math.PI).toFixed(1)+'°' } : {main:'–',sub:''}; }
-    case 'circle': { const r=d2(pts[0],pts[1]); return { main:'R '+fmtLen(r,m.page), sub:'φ '+fmtLen(2*r,m.page)+' ／ 面積 '+fmtArea(Math.PI*r*r,m.page) }; }
+    case 'circle': { const r=d2(pts[0],pts[1]); return { main:'R '+fmtLen(r,m.page), sub:'φ '+fmtLen(2*r,m.page)+' ／ 面積 '+fmtArea(Math.PI*r*r,m.page)+ceilTag(m) }; }
     case 'angle': return { main: angleDeg(pts[0],pts[1],pts[2]).toFixed(2)+'°', sub:'' };
   }
 }
+function ceilTag(m){ try{ const r=ceilCalc(m); return r.on? ' ／ 天井'+(r.bd? ' '+r.bd.replace('+','＋') : '') : ''; }catch(e){ return ''; } }   // 起動の途中（天井の部分を読む前）は出さない
 function dxdy(a,b,pg){ return 'ΔX '+fmtLen(Math.abs(b.x-a.x),pg)+' / ΔY '+fmtLen(Math.abs(b.y-a.y),pg); }
 function rawValue(m){ // numeric for export / totals: {len_mm, area_m2}
   const pts=geomPts(m), k=mmPer(m.page);
@@ -1919,8 +1921,9 @@ function refreshTotals(){
     if (m.kind==='dist' && !wallOk(m)){ L+=d2(pts[0],pts[1]); nL++; } else if (m.kind==='poly' && !wallOk(m)){ L+=pathLen(m,false); nL++; }
     else if (m.kind==='area'||m.kind==='rect'||m.kind==='circle'){ A+=shapeArea(m); nA++; } }
   let WA=0, nW=0; for (const m of pageMeas()) if (m.inc!==false && wallOk(m)){ WA+=computeWall(m).net; nW++; }
-  $('#tot').innerHTML = `<div><span>長さ合計（${nL}件）</span><b>${nL?fmtLen(L):'–'}</b></div><div><span>面積合計（${nA}件）</span><b>${nA?fmtArea(A):'–'}</b></div>`+(nW?`<div class="wtot" title="クリックで壁の一括設定・集計を開く" style="cursor:pointer"><span>壁面積合計（${nW}件・片面）🧱</span><b>${fmtMm2(WA)}</b></div>`:'');
-  const wt=$('#tot').querySelector('.wtot'); if (wt) wt.onclick=()=>openWallBatch({});
+  let CA=0, nC=0; try{ for (const m of pageMeas()) if (isAreaM(m) && !m.draft){ const r=ceilCalc(m); if (r.on){ CA+=r.A; nC++; } } }catch(e){}
+  $('#tot').innerHTML = `<div><span>長さ合計（${nL}件）</span><b>${nL?fmtLen(L):'–'}</b></div><div><span>面積合計（${nA}件）</span><b>${nA?fmtArea(A):'–'}</b></div>`+(nW?`<div class="wtot" title="クリックで壁の一括設定・集計を開く" style="cursor:pointer"><span>壁面積合計（${nW}件・片面）🧱</span><b>${fmtMm2(WA)}</b></div>`:'')+(nC?`<div class="ctot" title="クリックで天井の集計（LGS・ボードの数量）を開く" style="cursor:pointer"><span>天井（${nC}か所）</span><b>${CA.toLocaleString('ja-JP',{minimumFractionDigits:2,maximumFractionDigits:2})} m²</b></div>`:'');
+  const wt=$('#tot').querySelector('.wtot'); if (wt) wt.onclick=()=>openWallBatch({}); const ct=$('#tot').querySelector('.ctot'); if (ct) ct.onclick=()=>openCeilBatch({});
 }
 async function copyTable(){
   const lu=$('#uLen').value, au=$('#uArea').value;
@@ -2659,6 +2662,7 @@ function renderRoomProps(el,m){
   const setRoom=n=>{ pushUndo(); m.room=n; m.name=n||m.name; save(); refreshList(); drawOv(); };
   $('#rName').onchange=e=>setRoom(e.target.value.trim());
   el.querySelectorAll('.chip').forEach(b=>b.onclick=()=>setRoom(b.dataset.n));
+  el.insertAdjacentHTML('beforeend', ceilPropsHtml(m)); bindCeilProps(el, m);
 }
 function layoutTable(m){
   if (!wallOk(m)) return ''; const c=computeWall(m); if (!c.layers.length) return '';
@@ -3708,20 +3712,33 @@ function takeoffWork(){
       const oh=Math.min(+o.h, c.Hb), oa=Math.max(0, c.Hb-oh)*w/1e6;
       rows.push([++no,'○',nm,sym,'開口',r1(w),'','',o.mark||'',r1(w),r1(oh),r3(oa),isWindowMark(o.mark||'')?'窓':'開口',p0.x,p0.y,p1.x,p1.y,'','']); info.ops++; }
   }
-  const work={format:'dxf-takeoff/作業データ', saved:new Date().toISOString(), from:'図面計測ツール', docs:[{name:S.name||''}], settings:{aLeg:false},
-    summary:{items:rows, walls:[...syms.values()].filter(w=>w.legend), rooms:[], chkLeft:0}};
+  // 天井：数える面積を部屋として渡す（積算の「天井の積算」で数える。階高は1つしか渡せないので一番多い物）
+  const rooms=[], ri={n:0, A:0, noCh:0, noScale:0, other:0, Hs:new Map(), H:0};
+  for (const m of ceilList()){ const r=ceilCalc(m); if (!r.on){ if (ceilOf(m).on && r.why==='縮尺が決まっていない') ri.noScale++; continue; }
+    rooms.push({name:String(m.room||m.name||'天井').slice(0,100), also:[], ch: r.ch? String(Math.round(r.ch)) : '', fl:[], excluded:null, area_m2:r3(r.A), coreArea_m2:null, perimeter_m:r3(r.per), drawnArea_m2:null, page:m.page, kind:r.kind, ser:r.ser, bd:r.bd});
+    ri.n++; ri.A+=r.A; if (!r.ch) ri.noCh++; if (r.H) ri.Hs.set(r.H,(ri.Hs.get(r.H)||0)+1); if (r.kind!==CEIL_DEF0.kind || r.ser!==CEIL_DEF0.ser || r.bd!==CEIL_DEF0.low) ri.other++; }
+  const Hm=[...ri.Hs].sort((a,b)=>b[1]-a[1])[0]; ri.H=Hm? Hm[0] : 0; info.room=ri;
+  const work={format:'dxf-takeoff/作業データ', saved:new Date().toISOString(), from:'図面計測ツール', docs:[{name:S.name||''}], settings:{aLeg:false, ...(ri.H? {slab:String(ri.H)} : {})},
+    summary:{items:rows, walls:[...syms.values()].filter(w=>w.legend), rooms, chkLeft:0}};
   return {work, info};
 }
 async function exportTakeoff(){
   const {work, info}=takeoffWork();
-  if (!info.walls){ toast(info.noScale? '縮尺の決まっていないページの壁は書き出せません。先に縮尺を設定してください' : '高さを入れた壁がありません'); return; }
+  const ri=info.room; if (!info.walls && ri.n){ showText('積算へ書き出せません', `材料積算（dxf-takeoff）は、壁が1本以上ない作業データを開けません（「壁の計測が1件もありません」）。
+天井だけのときは、「天井の集計」の「集計表をコピー」か「CSVで保存」で数量を使ってください。
+壁も一緒に書き出すときは、壁に高さを入れてから書き出してください（天井 ${ri.n}か所も一緒に渡します）。`); return; }
+  if (!info.walls && !ri.n){ toast(info.noScale||ri.noScale? '縮尺の決まっていないページの壁・天井は書き出せません。先に縮尺を設定してください' : '高さを入れた壁も、天井として数える面積もありません'); return; }
   const ok=await saveFile(baseName()+'_積算用作業データ.json', new Blob([JSON.stringify(work)],{type:'application/json'}));
   if (!ok) return;
-  const notes=[`壁 ${info.walls}本（壁片 ${info.pieces}・開口 ${info.ops}）`];
+  const notes=[...(info.walls? [`壁 ${info.walls}本（壁片 ${info.pieces}・開口 ${info.ops}）`] : []), ...(ri.n? [`天井 ${ri.n}か所（${ri.A.toFixed(2)} m²）`] : [])];
   if (info.noSpec) notes.push(`壁種を積算で選ぶ必要がある壁 ${info.noSpec}本`);
   if (info.changed) notes.push(`ボードを変えた壁 ${info.changed}本は、積算では認定仕様のボードで数えます`);
   if (info.arr) notes.push(`LGS の建て方を変えた壁 ${info.arr}本は、積算では壁種の建て方で数えます`);
   if (info.noScale) notes.push(`縮尺のないページの壁 ${info.noScale}本は外しました`);
+  if (ri.noScale) notes.push(`縮尺のないページの天井 ${ri.noScale}か所は外しました`);
+  if (ri.other) notes.push(`天井の張り方・野縁・ボードは作業データで渡せません。積算の「天井の積算」で選び直してください（積算の標準は 捨貼り・19形・GB-R9.5。違う物 ${ri.other}か所）`);
+  if (ri.noCh) notes.push(`CH の分からない天井 ${ri.noCh}か所は、積算では「数える」が外れます（CH を入れると数えます）`);
+  if (ri.Hs.size>1) notes.push(`階高は1つしか渡せないため ${ri.H.toLocaleString()}mm で渡しました（吊りボルトの長さは積算で部屋ごとに直せます）`);
   showText('積算へ書き出しました', notes.join('\n')+'\n\n材料積算（dxf-takeoff）の「ファイルを開く」でこのファイルを選ぶと、積算の決まり（割付・ボード倍率・副資材）で数量が出ます。\n割増はボード倍率・下地倍率で積算側に入れてください。');
 }
 function openExport(){
@@ -3890,6 +3907,7 @@ function cleanState(j){
       if (m.arcs && !isObj(m.arcs)) delete m.arcs; if (m.arcs) for (const i in m.arcs) if (!Number.isFinite(+m.arcs[i])) delete m.arcs[i];
       if (m.wall!=null){ if (!isObj(m.wall)) delete m.wall; else { const W=m.wall; W.h = Number.isFinite(+W.h)? +W.h : 0; if (!Array.isArray(W.openings)) W.openings=[];
         W.openings=W.openings.filter(o=>isObj(o) && [o.s,o.w,o.h].every(v=>Number.isFinite(+v))); if (typeof W.sys!=='string') W.sys=''; normLay(W); } }
+      if (m.ceil!=null){ if (!isObj(m.ceil)) delete m.ceil; else normCeil(m.ceil); }
       return true; }); }
   if (isObj(j.scales)) for (const k in j.scales){ const sc=j.scales[k]; if (pg(k) && isObj(sc) && Number.isFinite(+sc.mmPerUnit) && +sc.mmPerUnit>0){ sc.mmPerUnit=+sc.mmPerUnit; sc.label = typeof sc.label==='string'? sc.label : '1/'+Math.round(sc.mmPerUnit/(25.4/72)); out.scales[k]=sc; } else out.dropped++; }
   if (isObj(j.rots)) for (const k in j.rots){ const r=+j.rots[k]; if (pg(k) && [0,90,180,270].includes(r)) out.rots[k]=r; }
@@ -4028,6 +4046,183 @@ function flushAll(){ if (!S.key) return; if (S.editing) commitText(); saveLocal(
 window.addEventListener('pagehide', flushAll);
 document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState==='hidden') flushAll(); });
 document.addEventListener('freeze', flushAll);
+
+// ===================== 天井：面積を測ると、天井下地（LGS）とボードの数量を出す =====================
+// 決まりは材料積算（dxf-takeoff）の「天井の積算」と同じ（ceLines を写した物。数量の決まりは dxf-takeoff に合わせる＝ユーザーの決定。test/ceiling.mjs が両方の数を比べる）。
+// 関包スチール「天井標準使用数量」（100㎡あたり・カタログ p.24）。ボードは 面積÷1枚の面積（ボード倍率1）、ビス・ステープルは目安。
+const CEIL_STD={'捨貼り':{CC:30,CW:20,CS:50,SC:300,WC:100,SJ:50,WJ:20,CJ:30,H:160,B:160,N:320,p:'ボード 1820 の割付・野縁 @364'},
+ '突付貼り':{CC:30,CW:60,CS:60,SC:320,WC:320,SJ:60,WJ:60,CJ:30,H:160,B:160,N:320,p:'ボード 455 の割付・野縁 @227.5'},
+ '目透し貼り':{CC:30,CW:30,CS:50,SC:300,WC:180,SJ:50,WJ:30,CJ:30,H:160,B:160,N:320,p:'ボード 910 の割付・野縁 @303'},
+ 'スパンドレル':{CC:30,CW:0,CS:80,SC:500,WC:0,SJ:70,WJ:0,CJ:30,H:160,B:160,N:320,p:'シングル野縁 @450'}};
+const CEIL_KINDS=Object.keys(CEIL_STD), CEIL_LOW=['GB-R9.5','GB-R12.5','GB-F12.5','GB-F15','GB-S9.5','GB-S12.5'], CEIL_UP=[...CEIL_LOW,'RAB9','RAB12','RAB15'];
+const BD_CODE={'GB-R':'普通せっこうボード','GB-F':'強化せっこうボード','GB-S':'シージングせっこうボード','GB-H':'硬質せっこうボード','GB-RH':'硬質せっこうボード','GB-NC':'不燃積層せっこうボード','GB-D':'化粧せっこうボード'}, BD_SHEET={'3×6':[910,1820],'2×6':[606,1820]};
+const nfj=(v,d=0)=>(+v||0).toLocaleString('ja-JP',{minimumFractionDigits:d,maximumFractionDigits:d}), ceilUp=v=>Math.ceil(v-1e-9);
+function ceilBoard(id){ const r=/^([A-Z]+(?:-[A-Z]+)?)\s*(\d+(?:\.\d+)?)$/.exec(id)||[], c=r[1]||id, t=+r[2]||0, nm=BD_CODE[c], size= c==='GB-F'&&t>=21? '2×6' : '3×6', hard= c==='GB-H'||c==='GB-RH';
+  return {id, name: nm? `${nm} ${c} ${t}mm` : id, thk:t, size, wh:BD_SHEET[size],
+    screw: t===9.5?['3.5×22',36]:t===12.5?['3.5×25',36]:t===15?['3.5×28',36]:t===21&&size==='2×6'?['3.5×32',28]:null,
+    staple: hard?['419MA(N)',150]:t===21?['432MA(N)',100]:t===15?['425J',150]:t===12.5?['422J',150]:t===9.5?['419J',150]:null}; }
+const bdLabel=id=>!id? 'なし' : /^RAB/.test(id)? `岩綿吸音板 RAB ${id.slice(3)}mm` : (b=>`${id}（${b.name.replace(/ GB-\w+ /,' ')}）`)(ceilBoard(id));
+// 1か所の数量（dxf-takeoff の ceLines と同じ。ボード倍率は1）
+function ceilLines(A, kindN, ser, L, bd, loss){
+  const T=CEIL_STD[kindN]||CEIL_STD['捨貼り'], f=1+(+loss||0)/100, k=A/100*f, out=[], add=(cat,name,spec,unit,q,basis)=>{ if (q>0) out.push({cat,name,spec,unit,q,basis}); };
+  const b=`${nfj(A,2)}㎡÷100×`, lo=+loss? `×（1＋ロス${loss}%）` : '', s25=ser===25;
+  add('天井','野縁受け',`CC-${ser} L=5,000`,'本',T.CC*k,`${b}${T.CC}本${lo}｜${kindN}（${T.p}）`); add('天井','ダブル野縁',`CW-${ser} L=5,000`,'本',T.CW*k,`${b}${T.CW}本${lo}`); add('天井','シングル野縁',`CS-${ser} L=5,000`,'本',T.CS*k,`${b}${T.CS}本${lo}`);
+  add('天井','シングルクリップ','SC（0.6）','個',T.SC*k,`${b}${T.SC}個${lo}`); add('天井','ダブルクリップ','WC（0.6）','個',T.WC*k,`${b}${T.WC}個${lo}`);
+  add('天井','野縁ジョイント（シングル）',s25?'25SJ':'SJ','個',T.SJ*k,`${b}${T.SJ}個${lo}`); add('天井','野縁ジョイント（ダブル）',s25?'25WJ':'WJ','個',T.WJ*k,`${b}${T.WJ}個${lo}`); add('天井','野縁受けジョイント','CJ','個',T.CJ*k,`${b}${T.CJ}個${lo}`);
+  add('天井','ハンガー','H','個',T.H*k,`${b}${T.H}個${lo}`); add('天井','吊りボルト',`W3/8（3分） L=${nfj(L)}`,'本',T.B*k,`${b}${T.B}本${lo}｜長さ ${nfj(L)}`); add('天井','ナット','W3/8（3分）','個',T.N*k,`${b}${T.N}個${lo}`);
+  if (bd) String(bd).split('+').filter(Boolean).forEach((id,li)=>{
+    if (/^RA[BG]/.test(id)){ const t=id.replace(/^RA[BG]/,''), c=id.slice(0,3); add('ボード',c==='RAB'?'岩綿吸音板 RAB':c,'t='+t,'m²',A*f,`天井 ${nfj(A,2)}㎡${lo}（枚の大きさが分からないので m²。接着材・ステープルは入っていません）`); return; }
+    const K=ceilBoard(id), ua=K.wh[0]*K.wh[1]/1e6, sh=A/ua*f; add('ボード',K.name,K.size,'枚',sh,`天井 ${nfj(A,2)}㎡÷${nfj(ua,4)}㎡×ボード倍率1${lo}`);
+    if (li===0){ if (K.screw) add('副資材','ビス',K.screw[0],'本',sh*K.screw[1],`天井ボード ${nfj(sh,1)}枚×${K.screw[1]}本/枚（目安）`); }
+    else if (K.staple) add('副資材','ステープル',K.staple[0],'本',sh*K.staple[1],`天井ボード 上張り ${nfj(sh,1)}枚×${K.staple[1]}本/枚（目安）`); });
+  return out;
+}
+// 設定：共通（この端末に覚える）と、面積ごと（m.ceil）。決まった値だけ残す（読み込んだファイルの値も通る）
+const CEIL_N={ch:[1000,20000], H:[1000,30000], slabT:[0,1000], bolt:[10,500], loss:[0,50]};
+function normCeil(C){ if (!C || typeof C!=='object' || Array.isArray(C)) return {};
+  for (const k of Object.keys(C)) if (!['on','kind','ser','low','up',...Object.keys(CEIL_N)].includes(k)) delete C[k];
+  if (C.on!=null) C.on= C.on===true;
+  if (C.kind!=null && !CEIL_KINDS.includes(C.kind)) delete C.kind;
+  if (C.ser!=null){ C.ser=+C.ser; if (C.ser!==19 && C.ser!==25) delete C.ser; }
+  if (C.low!=null && !['',...CEIL_LOW].includes(C.low)) delete C.low;
+  if (C.up!=null && !['',...CEIL_UP].includes(C.up)) delete C.up;
+  for (const k in CEIL_N) if (C[k]!=null){ const v=Math.round(+C[k]); if (Number.isFinite(v) && v>=CEIL_N[k][0] && v<=CEIL_N[k][1]) C[k]=v; else delete C[k]; }
+  return C; }
+const CEIL_DEF0={on:true, kind:'捨貼り', ser:19, low:'GB-R9.5', up:'', slabT:200, bolt:100, loss:0};   // 積算（dxf-takeoff）の標準と同じ
+S.ceilDef=(()=>{ let j={}; try{ j=JSON.parse(localStorage.getItem('pdfmeasure:ceildef')||'{}'); }catch(e){} return Object.assign({}, CEIL_DEF0, normCeil(j)); })();
+function saveCeilDef(){ try{ localStorage.setItem('pdfmeasure:ceildef', JSON.stringify(S.ceilDef)); }catch(e){} }
+const isAreaM = m => !!m && (m.kind==='area'||m.kind==='rect'||m.kind==='circle');
+function ceilList(){ const out=[]; for (const pg of Object.keys(S.meas).map(Number).sort((a,b)=>a-b)) for (const m of S.meas[pg]||[]) if (isAreaM(m) && !m.draft && m.pts && m.pts.length>=2){ if (m.page==null) m.page=pg; out.push(m); } return out; }
+function ceilOf(m){ const D=S.ceilDef, C=m.ceil||{};
+  return {on: C.on!=null? C.on : !!D.on, kind: C.kind||D.kind, ser: +(C.ser||D.ser), low: C.low!=null? C.low : D.low, up: C.up!=null? C.up : D.up, H: +C.H||+D.H||0, ch: +C.ch||0}; }
+// 図面の文字から天井高（CH=2,400・CH2400・天井高2400）。囲みの中で、真ん中に近い物
+const _chMemo=new WeakMap();
+function chFromText(m){ const T=S.stexts&&S.stexts[m.page]; if (!T||!T.length) return null; const key=JSON.stringify(m.pts)+'|'+T.length, had=_chMemo.get(m); if (had && had.key===key) return had.v;
+  const P=pathPts(m), c=centroid(P); let best=null;
+  for (const t of T){ const r=/(?:C\.?H|天井高)[=:＝：]?(\d{4,5})(?!\d)/i.exec(nz(String(t.raw||'')).replace(/[,，]/g,'')); if (!r) continue; const v=+r[1]; if (v<1800||v>9000) continue;
+    const p={x:t.cx??t.x, y:t.cy??t.y}; if (!pointInPoly(p,P)) continue; const d=Math.hypot(p.x-c.x,p.y-c.y); if (!best||d<best.d) best={v,d}; }
+  const v=best? {v:best.v} : null; _chMemo.set(m,{key,v}); return v; }
+function ceilCalc(m){
+  const C=ceilOf(m), D=S.ceilDef, k=mmPer(m.page), sc=!!scaleOf(m.page);
+  const A= k!=null? Math.round(shapeArea(m)*k*k/1e3)/1e3 : 0,   /* 0.001㎡に丸める（作業データの面積と同じ。積算と同じ数になる） */ per= k!=null? (m.kind==='circle'? TAU*d2(m.pts[0],m.pts[1]) : pathLen(m,true))*k/1000 : 0;
+  const auto= C.ch? null : chFromText(m), ch= C.ch || (auto? auto.v : 0);
+  const fz= C.H&&ch? C.H-ch-(+D.slabT||0) : 0, bs=+D.bolt||100, L= fz>0? Math.max(300, ceilUp(fz/bs)*bs) : 1000;
+  const why= !sc? '縮尺が決まっていない' : !(A>0)? '面積がない' : '';
+  const on= C.on && !why, bd=[C.low,C.up].filter(Boolean).join('+');
+  const note=[fz>=1500?'懐 1.5m 以上：吊りボルトの補強（水平つなぎ・ブレース）が要る（数量に入っていません）':'', !C.H?'階高が分からないため、吊りボルトは 1,000':!ch?'CH が分からないため、吊りボルトは 1,000':fz<=0?'階高が CH＋スラブ厚より小さいため、吊りボルトは 1,000':''].filter(Boolean);
+  return {m, ...C, A, per, ch, chSrc: C.ch? '手入力' : auto? '図面の文字' : '', fz, L, why, on, bd, note, lines: on? ceilLines(A, C.kind, C.ser, L, bd, D.loss) : []};
+}
+// 材料ごとに足してから切り上げる（積算の合計と同じ）
+function ceilTotals(rs){ const M=new Map(); for (const r of rs) for (const l of r.lines){ const k=[l.cat,l.name,l.spec,l.unit].join('|'), o=M.get(k)||{cat:l.cat,name:l.name,spec:l.spec,unit:l.unit,q:0}; o.q+=l.q; M.set(k,o); }
+  const ci={'天井':0,'ボード':1,'副資材':2}; return [...M.values()].sort((a,b)=>ci[a.cat]-ci[b.cat]); }
+const qtyTxt=l=> l.unit==='m²'? nfj(l.q,2) : nfj(ceilUp(l.q));
+function ceilQtyTable(lines, narrow){ if (narrow) return `<table class="lay ceqn"><tr><th>材料・規格</th><th>数量</th></tr>${lines.map(l=>`<tr title="${esc(l.basis||'')}"><td>${esc(l.name)}<small>${esc(l.spec)}</small></td><td><b>${qtyTxt(l)}</b> ${esc(l.unit)}</td></tr>`).join('')}</table>`;
+  return `<table class="qty ceq"><tr><th>区分</th><th>材料</th><th>規格</th><th>数量</th><th>単位</th></tr>${lines.map(l=>`<tr title="${esc(l.basis||'')}"><td>${l.cat==='天井'?'LGS（天井）':esc(l.cat)}</td><td>${esc(l.name)}</td><td>${esc(l.spec)}</td><td><b>${qtyTxt(l)}</b></td><td>${esc(l.unit)}</td></tr>`).join('')}</table>`; }
+const ceilOpt=(arr,cur)=>arr.map(([v,t])=>`<option value="${esc(String(v))}" ${String(cur)===String(v)?'selected':''}>${esc(t)}</option>`).join('');
+const CEIL_KIND_OPT=CEIL_KINDS.map(k=>[k, `${k}（${CEIL_STD[k].p}）`]), CEIL_LOW_OPT=[['','なし'],...CEIL_LOW.map(v=>[v,bdLabel(v)])], CEIL_UP_OPT=[['','なし'],...CEIL_UP.map(v=>[v,bdLabel(v)])];
+// 面積の設定欄に出す「天井」
+function ceilPropsHtml(m){ const r=ceilCalc(m), C=m.ceil||{}, D=S.ceilDef;
+  return `<h2 style="margin-top:10px"><span>天井（この面積から）</span><label class="chk" style="font-weight:400;font-size:12px;display:flex;gap:4px;align-items:center"><input type="checkbox" id="cOn" ${r.on||(ceilOf(m).on&&r.why)?'checked':''}>数える</label></h2>
+   ${r.why && ceilOf(m).on? `<div class="pmini warn">${r.why==='縮尺が決まっていない'?'縮尺が決まっていないため数えられません。先に縮尺を設定してください。':'面積がありません。'}</div>` : ''}
+   ${ceilOf(m).on? `<div class="pg"><label>張り方</label><select id="cKind">${ceilOpt(CEIL_KIND_OPT, r.kind)}</select></div>
+   <div class="pg"><label>野縁</label><div class="segb" id="cSer"><button data-v="19" class="${r.ser===19?'on':''}">19形</button><button data-v="25" class="${r.ser===25?'on':''}">25形</button></div></div>
+   <div class="pg"><label>捨て貼り</label><select id="cLow">${ceilOpt(CEIL_LOW_OPT, r.low)}</select></div>
+   <div class="pg"><label>上貼り</label><select id="cUp">${ceilOpt(CEIL_UP_OPT, r.up)}</select></div>
+   <div class="pg"><label>天井高 CH</label><input class="inp" id="cCh" type="number" inputmode="numeric" min="0" step="10" value="${C.ch||''}" placeholder="${r.chSrc==='図面の文字'? '図面 '+r.ch : '未入力'}"><span class="u">mm</span></div>
+   <div class="pg"><label>階高</label><input class="inp" id="cH" type="number" inputmode="numeric" min="0" step="10" value="${C.H||''}" placeholder="${D.H? '共通 '+D.H : '未入力'}"><span class="u">mm</span></div>
+   ${r.on? `<div class="pmini">面積 <b>${nfj(r.A,2)} m²</b>　CH ${r.ch? nfj(r.ch)+(r.chSrc==='図面の文字'?'（図面の文字）':'') : '—'}　懐 ${r.fz>0? nfj(r.fz) : '—'}　吊りボルト L=${nfj(r.L)}</div>
+   ${r.note.map(n=>`<div class="pmini warn">⚠ ${esc(n)}</div>`).join('')}${ceilQtyTable(r.lines, true)}
+   <div class="pmini">関包スチール「天井標準使用数量」（100㎡あたり）で数えています。材料積算（dxf-takeoff）の「天井の積算」と同じ決まりです（ボード倍率1・ロス${+D.loss||0}%）。ここでは1か所ごとに切り上げ、集計では足してから切り上げます。</div>` : ''}
+   <div style="display:flex;gap:6px;margin-top:4px"><button class="btn" style="flex:1" id="cAll">天井の集計…</button><button class="btn" style="flex:1" id="cDef" title="これから測る面積の標準を、この張り方・野縁・ボードにする">この条件を標準に</button></div>` : '<div class="pmini">天井として数えていません。</div>'}`;
+}
+function bindCeilProps(el, m){
+  const upd=fn=>{ pushUndo(); m.ceil=normCeil(Object.assign({}, m.ceil||{})); fn(m.ceil); normCeil(m.ceil); save(); refreshListValues(); refreshTotals(); refreshProps(); };
+  const q=id=>el.querySelector('#'+id);
+  el.querySelectorAll('input,select').forEach(x=>x.addEventListener('keydown',e=>e.stopPropagation()));
+  if (q('cOn')) q('cOn').onchange=e=>upd(C=>{ C.on=e.target.checked; });
+  if (q('cKind')) q('cKind').onchange=e=>upd(C=>{ C.kind=e.target.value; });
+  el.querySelectorAll('#cSer button').forEach(b=>b.onclick=()=>upd(C=>{ C.ser=+b.dataset.v; }));
+  if (q('cLow')) q('cLow').onchange=e=>upd(C=>{ C.low=e.target.value; });
+  if (q('cUp')) q('cUp').onchange=e=>upd(C=>{ C.up=e.target.value; });
+  for (const [id,k] of [['cCh','ch'],['cH','H']]) if (q(id)) q(id).onchange=e=>{ const v=e.target.value; if (v!=='' && !(+v>=CEIL_N[k][0] && +v<=CEIL_N[k][1])){ toast(`${nfj(CEIL_N[k][0])}〜${nfj(CEIL_N[k][1])}mm で入力してください`); e.target.value=(m.ceil||{})[k]||''; return; } upd(C=>{ if (v==='') delete C[k]; else C[k]=+v; }); };
+  if (q('cAll')) q('cAll').onclick=()=>openCeilBatch({ids:[m.id]});
+  if (q('cDef')) q('cDef').onclick=()=>{ const r=ceilOf(m); Object.assign(S.ceilDef,{kind:r.kind, ser:r.ser, low:r.low, up:r.up}); saveCeilDef(); toast(`これから測る面積の標準：${r.kind}・${r.ser}形・捨て貼り ${bdLabel(r.low)}・上貼り ${bdLabel(r.up)}`); };
+}
+// ---- 天井の集計（全部の面積） ----
+const CB={scope:'all', sel:new Set()};
+function ceilTableRows(rs){ const rows=[['ページ','名前','面積(m²)','CH(mm)','CHの出どころ','階高(mm)','懐(mm)','吊りボルトL(mm)','張り方','野縁','捨て貼り','上貼り','数える']];
+  for (const r of rs) rows.push([r.m.page, r.m.name, +r.A.toFixed(3), r.ch||'', r.chSrc, r.H||'', r.fz>0? r.fz : '', r.L, r.kind, r.ser+'形', r.low, r.up, r.on?'○':'']);
+  const T=ceilTotals(rs.filter(x=>x.on)); rows.push([]); rows.push(['区分','材料','規格','数量','単位']); for (const l of T) rows.push([l.cat==='天井'?'LGS（天井）':l.cat, l.name, l.spec, l.unit==='m²'? +l.q.toFixed(2) : ceilUp(l.q), l.unit]);
+  return rows; }
+function openCeilBatch(opt={}){
+  if (!S.W){ toast('先にファイルを開いてください'); return; }
+  if (opt.ids && opt.ids.length) CB.sel=new Set(opt.ids);
+  const D=S.ceilDef, dlg=$('#dlg'); dlg.classList.add('wide');
+  dlg.innerHTML=`<h3>天井の集計（面積から）</h3>
+   <p class="sub">面積・矩形・円で測った範囲を天井として、天井下地（LGS）とボードの数量を出します。決まりは材料積算（dxf-takeoff）の「天井の積算」と同じです（関包スチール「天井標準使用数量」100㎡あたり）。天井でない面積は「数える」を外してください。</p>
+   <div class="wbbar">
+     <div class="segb" id="cbScope"><button data-v="page">このページ</button><button data-v="all">全ページ</button></div><span class="wbsep"></span>
+     <label>張り方 <select id="cbKind"><option value="__keep">変更しない</option>${ceilOpt(CEIL_KIND_OPT,'')}</select></label>
+     <label>野縁 <select id="cbSer"><option value="__keep">変更しない</option><option value="19">19形</option><option value="25">25形</option></select></label>
+     <label>捨て貼り <select id="cbLow"><option value="__keep">変更しない</option>${ceilOpt(CEIL_LOW_OPT,'__none')}</select></label>
+     <label>上貼り <select id="cbUp"><option value="__keep">変更しない</option>${ceilOpt(CEIL_UP_OPT,'__none')}</select></label>
+     <label>CH <input class="inp" id="cbCh" type="number" min="0" step="10" placeholder="変更しない"> mm</label>
+     <label>階高 <input class="inp" id="cbH" type="number" min="0" step="10" placeholder="変更しない"> mm</label>
+     <label>数える <select id="cbOn"><option value="__keep">変更しない</option><option value="1">数える</option><option value="0">数えない</option></select></label>
+     <button class="btn pri" id="cbApply">選択した面積に適用</button><span class="wbsep"></span>
+     <label title="面積ごとに階高を入れていないときに使う">共通の階高 <input class="inp" id="cbDH" type="number" min="0" step="10" value="${D.H||''}" placeholder="未入力"> mm</label>
+     <label>スラブ厚 <input class="inp" id="cbSlab" type="number" min="0" step="10" value="${D.slabT}"> mm</label>
+     <label title="吊りボルトの長さを、この寸法ごとに切り上げる">ボルトの切り上げ <input class="inp" id="cbBolt" type="number" min="10" step="10" value="${D.bolt}"> mm</label>
+     <label>ロス <input class="inp" id="cbLoss" type="number" min="0" max="50" step="1" value="${D.loss||0}"> %</label>
+     <label title="外すと、新しく測った面積は天井として数えない"><input type="checkbox" id="cbDef" ${D.on?'checked':''}> 面積を測ったら天井として数える</label>
+   </div>
+   <div class="wbtbl" id="cbTbl"></div><div id="cbSum"></div>
+   <div class="acts"><button class="btn" id="cbCopy">集計表をコピー</button><button class="btn" id="cbCsv">CSVで保存</button><button class="btn" id="cbTk" title="dxf-takeoff の材料積算で開ける作業データ（JSON）を保存">積算へ書き出し</button><button class="btn pri" id="bCancel">閉じる</button></div>`;
+  const list=()=>ceilList().filter(m=>CB.scope==='all' || m.page===S.page);
+  const render=()=>{
+    dlg.querySelectorAll('#cbScope button').forEach(b=>b.classList.toggle('on', b.dataset.v===CB.scope));
+    const ms=list(), rs=ms.map(ceilCalc); for (const id of [...CB.sel]) if (!ms.some(m=>m.id===id)) CB.sel.delete(id);
+    $('#cbApply').textContent=`選択した ${CB.sel.size} 件に適用`;
+    if (!ms.length){ $('#cbTbl').innerHTML='<div class="empty">面積の計測がありません。面積（A）・矩形・円で天井の範囲を測ってください。</div>'; $('#cbSum').innerHTML=''; return; }
+    const sheets=r=>r.lines.filter(l=>l.unit==='枚').reduce((a,l)=>a+ceilUp(l.q),0);
+    $('#cbTbl').innerHTML=`<table class="wb"><thead><tr><th><input type="checkbox" id="cbAll" ${ms.every(m=>CB.sel.has(m.id))?'checked':''}></th><th>P</th><th>名前</th><th>面積 m²</th><th>CH</th><th>階高</th><th>懐</th><th>吊りボルト</th><th>張り方</th><th>野縁</th><th>捨て貼り</th><th>上貼り</th><th>ボード</th><th>数える</th></tr></thead><tbody>${rs.map(r=>{ const m=r.m;
+      return `<tr data-id="${m.id}" class="${CB.sel.has(m.id)?'on':''}${r.on?'':' nw'}"><td><input type="checkbox" data-sel ${CB.sel.has(m.id)?'checked':''}></td><td>${m.page}</td>
+        <td class="nm"><span class="dot" style="background:${colOf(m)}"></span>${esc(m.name)}</td><td>${r.why==='縮尺が決まっていない'? '<small class="warn">縮尺なし</small>' : nfj(r.A,2)}</td>
+        <td><input class="hin" data-f="ch" type="number" min="0" step="10" value="${(m.ceil||{}).ch||''}" placeholder="${r.chSrc==='図面の文字'? r.ch : '—'}" title="${r.chSrc==='図面の文字'?'図面の文字から読んだ天井高（入れると手入力が優先）':'天井高'}"></td>
+        <td>${r.H? nfj(r.H) : '—'}</td><td>${r.fz>0? nfj(r.fz)+(r.fz>=1500?' <small class="warn">⚠</small>':'') : '—'}</td><td>${nfj(r.L)}</td><td>${esc(r.kind)}</td><td>${r.ser}形</td><td>${esc(r.low||'なし')}</td><td>${esc(r.up||'なし')}</td><td>${r.on&&sheets(r)? sheets(r)+'枚' : ''}</td>
+        <td><input type="checkbox" data-on ${ceilOf(m).on?'checked':''}></td></tr>`; }).join('')}</tbody></table>`;
+    const on=rs.filter(r=>r.on), A=on.reduce((a,r)=>a+r.A,0), T=ceilTotals(on), fz=on.filter(r=>r.fz>=1500).length, noH=on.filter(r=>!(r.H&&r.ch)).length;
+    $('#cbSum').innerHTML= on.length? `<div class="wbsum"><div class="wbtot"><div><span>天井</span><b>${on.length} か所</b></div><div class="hl"><span>天井面積</span><b>${nfj(A,2)} m²</b></div></div>
+      ${fz? `<div class="pmini warn">⚠ 懐 1.5m 以上 ${fz}か所：吊りボルトの補強（水平つなぎ・ブレース）が要ります（数量に入っていません）</div>` : ''}${noH? `<div class="pmini warn">⚠ CH か階高の分からない ${noH}か所は、吊りボルトを 1,000 で数えています</div>` : ''}
+      ${ceilQtyTable(T)}<div class="pmini">材料ごとに足してから切り上げています。ボード倍率・割増は積算側で入れてください。</div></div>` : '<div class="pmini">天井として数える面積がありません。</div>';
+    $('#cbAll').onchange=e=>{ for (const m of ms) e.target.checked? CB.sel.add(m.id) : CB.sel.delete(m.id); render(); };
+    $('#cbTbl').querySelectorAll('tr[data-id]').forEach(tr=>{ const id=+tr.dataset.id, m=ms.find(x=>x.id===id);
+      tr.querySelector('[data-sel]').onchange=e=>{ e.target.checked? CB.sel.add(id) : CB.sel.delete(id); tr.classList.toggle('on',e.target.checked); $('#cbApply').textContent=`選択した ${CB.sel.size} 件に適用`; };
+      tr.querySelector('[data-on]').onchange=e=>{ pushUndo(); m.ceil=normCeil(Object.assign({}, m.ceil||{})); m.ceil.on=e.target.checked; save(); refreshTotals(); render(); };
+      const ch=tr.querySelector('[data-f="ch"]'); ch.addEventListener('keydown',e=>e.stopPropagation());
+      ch.onchange=e=>{ const v=e.target.value; if (v!=='' && !(+v>=1000 && +v<=20000)){ toast('天井高は 1,000〜20,000mm で入力してください'); e.target.value=(m.ceil||{}).ch||''; return; } pushUndo(); m.ceil=normCeil(Object.assign({}, m.ceil||{})); if (v==='') delete m.ceil.ch; else m.ceil.ch=+v; save(); render(); };
+      tr.querySelector('.nm').onclick=()=>{ closeDlg(); const f=()=>{ S.sel=m.id; zoomTo(m); refreshList(); }; m.page!==S.page? gotoPage(m.page).then(f) : f(); }; });
+  };
+  const closeDlg=()=>{ closeModal(); dlg.classList.remove('wide'); };
+  dlg.querySelectorAll('input,select').forEach(x=>x.addEventListener('keydown',e=>{ e.stopPropagation(); if (e.key==='Enter' && x.closest('.wbbar') && /cbCh|cbH$/.test(x.id)) $('#cbApply').click(); }));
+  dlg.querySelectorAll('#cbScope button').forEach(b=>b.onclick=()=>{ CB.scope=b.dataset.v; render(); });
+  $('#cbApply').onclick=()=>{ const ids=[...CB.sel]; if (!ids.length){ toast('表の左のチェックで面積を選んでください'); return; }
+    const kv=$('#cbKind').value, sv=$('#cbSer').value, lv=$('#cbLow').value, uv=$('#cbUp').value, ov=$('#cbOn').value, chv=$('#cbCh').value, hv=$('#cbH').value;
+    for (const [v,k] of [[chv,'ch'],[hv,'H']]) if (v!=='' && !(+v>=CEIL_N[k][0] && +v<=CEIL_N[k][1])){ toast(`${k==='ch'?'天井高':'階高'}は ${nfj(CEIL_N[k][0])}〜${nfj(CEIL_N[k][1])}mm で入力してください`); return; }
+    if ([kv,sv,lv,uv,ov].every(v=>v==='__keep') && chv==='' && hv===''){ toast('変える条件を選んでください'); return; }
+    pushUndo(); let n=0; for (const m of ceilList().filter(x=>CB.sel.has(x.id))){ const C=m.ceil=normCeil(Object.assign({}, m.ceil||{}));
+      if (kv!=='__keep') C.kind=kv; if (sv!=='__keep') C.ser=+sv; if (lv!=='__keep') C.low=lv; if (uv!=='__keep') C.up=uv; if (ov!=='__keep') C.on= ov==='1'; if (chv!=='') C.ch=+chv; if (hv!=='') C.H=+hv; normCeil(C); n++; }
+    save(); refreshTotals(); render(); toast(`${n}件の面積に入れました`); };
+  const setDef=(id,k)=>{ $(id).onchange=e=>{ const v=e.target.value; const nv=normCeil({[k]: v===''? undefined : +v}); if (v!=='' && nv[k]==null){ toast('入れられない値です'); e.target.value=S.ceilDef[k]??''; return; } if (v==='') delete S.ceilDef[k]; else S.ceilDef[k]=nv[k]; if (k==='slabT'&&v==='') S.ceilDef.slabT=0; saveCeilDef(); refreshTotals(); render(); }; };
+  setDef('#cbDH','H'); setDef('#cbSlab','slabT'); setDef('#cbBolt','bolt'); setDef('#cbLoss','loss');
+  $('#cbDef').onchange=e=>{ S.ceilDef.on=e.target.checked; saveCeilDef(); refreshTotals(); render(); };
+  const tsv=()=>ceilTableRows(list().map(ceilCalc)).map(r=>r.map(v=>{ const c=csvCell(v); return c.startsWith('"')? c.slice(1,-1).replace(/""/g,'"') : c; }).join('\t')).join('\n');
+  $('#cbCopy').onclick=async()=>{ const t=tsv(); try{ await navigator.clipboard.writeText(t); toast('集計表をコピーしました（Excelに貼り付け可）'); }catch(e){ showText('天井 集計表', t); } };
+  $('#cbCsv').onclick=async()=>{ await saveFile(baseName()+'_天井集計.csv', toCsv(ceilTableRows(list().map(ceilCalc)))); };
+  $('#cbTk').onclick=()=>exportTakeoff();
+  $('#bCancel').onclick=closeDlg;
+  render(); $('#modal').classList.add('show');
+}
 
 // ===================== 壁の一括設定・集計・展開図（割付図） =====================
 const CIRC = n => n>=1&&n<=20? String.fromCharCode(0x245F+n) : n<=35? String.fromCharCode(0x3250+n-20) : n<=50? String.fromCharCode(0x32B0+n-35) : `(${n})`;
@@ -4645,7 +4840,7 @@ document.querySelectorAll('#modeSeg button').forEach(b=>b.onclick=()=>setMode(b.
 document.querySelectorAll('#ntools .tb[data-t]').forEach(b=>b.onclick=()=>setTool(b.dataset.t));
 $('#bImg').onclick=()=>$('#imgfile').click(); $('#imgfile').onchange=e=>{ insertImageFile(e.target.files[0]); e.target.value=''; };
 document.addEventListener('paste', e=>{ if (!S.W || e.target.isContentEditable || /INPUT|TEXTAREA/.test(e.target.tagName)) return; const f=[...(e.clipboardData&&e.clipboardData.files||[])].find(f=>/^image\//.test(f.type)); if (f){ e.preventDefault(); insertImageFile(f); } });
-$('#bWallB').onclick=()=>openWallBatch({}); $('#bDev').onclick=()=>openDevView({startId: wallOk(selMeas()||{})? S.sel : null});
+$('#bWallB').onclick=()=>openWallBatch({}); $('#bCeil').onclick=()=>openCeilBatch({}); $('#bDev').onclick=()=>openDevView({startId: wallOk(selMeas()||{})? S.sel : null});
 $('#selbar').querySelectorAll('button').forEach(b=>b.onclick=()=>{ const a=b.dataset.a; if (a==='ai') aiInkToText(); else if (a==='wallb') openWallBatch({ids:lassoMeas().filter(m=>m.kind==='dist'||m.kind==='poly').map(m=>m.id)}); else selAction(a, b.dataset.c); });
 $('#txted').addEventListener('keydown', e=>{ e.stopPropagation(); if (e.key==='Escape' || (e.key==='Enter' && (e.ctrlKey||e.metaKey))){ e.preventDefault(); $('#txted').blur(); } });
 $('#txted').addEventListener('blur', ()=>commitText());
@@ -4678,7 +4873,7 @@ setTool('dist'); resize(); refreshAll();
 $('#hint').textContent='PDFまたは画像を開いてください（ドラッグ＆ドロップ可）';
 tryResume().catch(e=>{ console.warn('resume',e); busy(''); renderRecentCard(); });
 window.__S=S;
-window.__zk={LOWMEM, TL, tget, tkey, tilesReady, tilesNeeded, visTiles, renderHi, tilesDropFile, tilesErase, PJ, GeoHarvest, extractGeometry, pdfJob, readPdfBytes, crashedBefore, gotoPage, zoomAt, computeWall, wallRow, takeoffWork, wallList, refreshProps, openWallBatch, cutList, cutRows, edgeTxt, elevSVG, sheetSVG, openDevView, showElevation, newWallObj, LV};   // 試験用（test/link.mjs）
+window.__zk={LOWMEM, TL, tget, tkey, tilesReady, tilesNeeded, visTiles, renderHi, tilesDropFile, tilesErase, PJ, GeoHarvest, extractGeometry, pdfJob, readPdfBytes, crashedBefore, gotoPage, zoomAt, computeWall, wallRow, takeoffWork, wallList, refreshProps, openWallBatch, cutList, cutRows, edgeTxt, ceilCalc, ceilTotals, ceilList, openCeilBatch, normCeil, chFromText, elevSVG, sheetSVG, openDevView, showElevation, newWallObj, LV};   // 試験用（test/link.mjs）
 })();
 </script>
 </body>

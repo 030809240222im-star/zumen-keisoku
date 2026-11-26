@@ -9,7 +9,7 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - `index.html` … アプリ本体（HTML・CSS・JavaScript をこの1ファイルに収めている）。**ここが正本**。
 - `cmaps-ja.json` … 日本語PDFの文字を読むための CMap（base64）。通常は触らない。
 - `lib/` … pdf.js 3.11.174（`pdf.min.js`・`pdf.worker.min.js`）、pdf-lib 1.17.1、日本語以外の CMap（`cmaps/`）。npm の公式パッケージから取り出し、CDN と同じ中身であることを確かめた物。**外の CDN からは読まない**（Claude 上など lib/ が無いときだけ、改ざん検査 SRI 付きで CDN を使う）。版を変えるときは `index.html` の `LIBS` の `sri` を作り直す（`test/security.mjs` が一致を確かめる）。
-- `sw.js` … オフライン起動用 Service Worker。**index.html を変えたら `VER` の番号を1つ上げる**（例 zumen-v14 → zumen-v15）。
+- `sw.js` … オフライン起動用 Service Worker。**index.html を変えたら `VER` の番号を1つ上げる**（例 zumen-v15 → zumen-v16）。
 - `manifest.webmanifest` / `icon-*.png` / `apple-touch-icon.png` … ホーム画面追加（PWA）用。
 - `admin.html` … 利用者（メールアドレス）の管理の画面。Cloudflare Pages の `/admin`。データは必ず `textContent` で出す（innerHTML に入れない）。
 - `functions/` … Cloudflare Pages Functions。
@@ -61,6 +61,12 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - キワの寸法は `cutList`（開口で分かれる所は分け、切り欠きを付ける）。足すと張る面積に合うことを試験で確かめる。
 - 画面の言葉は「捨て貼り・上貼り」、内部の番号は `A下張`・`A上張` のまま（`sideName` で直す）。A面は始点→終点を見て左側で、標準の図は裏（B面側）から見た向き（`LV.front` で正面から）。
 
+## 天井：面積から LGS とボードの数量（2026-11-26 から）
+- 面積・矩形・円を測ると、その範囲を天井として数える（`ceilCalc`。面積ごとの設定は `m.ceil`、共通は `S.ceilDef`＝この端末の localStorage `pdfmeasure:ceildef`。値は `normCeil` で決まった物だけ残す）。
+- **決まりは材料積算（dxf-takeoff）の「天井の積算」（`ceLines`）と同じ**：関包スチール「天井標準使用数量」（100㎡あたり）×面積、ボードは面積÷1枚の面積（ボード倍率1）、ビス・ステープルは目安。面積は 0.001㎡ に丸めてから数える（作業データと同じ）。`test/ceiling.mjs` が積算と同じ数になるかを比べるので、積算の決まりが変わったらこちらも直す。
+- 吊りボルトの長さ＝階高−CH−スラブ厚 を切り上げ（最小300）。CH は手入力か、囲みの中の図面の文字（`chFromText`。CH=2,400 など）。分からなければ 1,000。
+- 積算へ書き出すと、数える面積は作業データの `summary.rooms` になる（階高は `settings.slab` に1つだけ）。積算は張り方・ボードを読まないので、標準と違うときは断りを出す。積算は壁のない作業データを開けないので、壁がないときは書き出さずに案内する。
+
 ## 動作確認
 - VS Code の Live Server で `index.html` を開く（右下の「Go Live」→ http://127.0.0.1:5500/ ）。
 - 確認の基本: PDFを開く → 縮尺が自動で入る → 距離/連続線/面積/円弧を計測 → 🧱壁の一括設定 → 展開図 → 書き出し。
@@ -68,6 +74,7 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - 試験（どれも「すべて合格」が出ればよい。部品の jsdom・ws は dxf-takeoff の試験と同じ `%LOCALAPPDATA%\dxf-takeoff`）：
   - `node test/link.mjs`：積算へ書き出した作業データを dxf-takeoff の材料積算（`../../dxf-takeoff/app/material-estimate.html`）で開き、同じ壁の面積が両方で同じかと、天井高＋100・画面の操作を確かめる。壁の計算・書き出し・壁の設定欄を変えたら流す。
   - `node test/layout.mjs`：割付の条件・キワのカット寸法・端の寸法・展開図の画面。割付・展開図を変えたら流す。
+  - `node test/ceiling.mjs`：面積から天井の数量・CH の読み取り・設定欄と集計の画面、積算（dxf-takeoff）と同じ数になるか。天井の計算・積算への書き出しを変えたら流す。
   - `node test/security.mjs`：ログインの証明・入口・利用者の管理 API・管理の画面・初期設定の台本（にせの Cloudflare）・アプリの安全の直し。functions/・admin.html・tools/・ライブラリ・ログイン関係を変えたら流す。
   - `node tools/fbbuild.mjs && node test/firebase.mjs`：Firebase のエミュレータと Chrome で、決まり・登録・名簿・外す・電波なし。firebase/・名簿・ログインを変えたら流す（Java が要る）。
   - `node test/ipad.mjs`：iPad の条件で、線の多い図面を開く・拡大・ページ移動・区画の控え（一致・取り違え・開き直し）・落ちた後の軽い表示。`ENGINE=webkit` でも流す（Chrome だけでは Safari の遅さに気付けない）。PDF の読み込み・描画・線の読み取り・縮小画像を変えたら流す。
