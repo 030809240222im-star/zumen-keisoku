@@ -9,7 +9,7 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - `index.html` … アプリ本体（HTML・CSS・JavaScript をこの1ファイルに収めている）。**ここが正本**。
 - `cmaps-ja.json` … 日本語PDFの文字を読むための CMap（base64）。通常は触らない。
 - `lib/` … pdf.js 3.11.174（`pdf.min.js`・`pdf.worker.min.js`）、pdf-lib 1.17.1、日本語以外の CMap（`cmaps/`）。npm の公式パッケージから取り出し、CDN と同じ中身であることを確かめた物。**外の CDN からは読まない**（Claude 上など lib/ が無いときだけ、改ざん検査 SRI 付きで CDN を使う）。版を変えるときは `index.html` の `LIBS` の `sri` を作り直す（`test/security.mjs` が一致を確かめる）。
-- `sw.js` … オフライン起動用 Service Worker。**index.html を変えたら `VER` の番号を1つ上げる**（例 zumen-v19 → zumen-v20）。
+- `sw.js` … オフライン起動用 Service Worker。**index.html を変えたら `VER` の番号を1つ上げる**（例 zumen-v20 → zumen-v21）。
 - `manifest.webmanifest` / `icon-*.png` / `apple-touch-icon.png` … ホーム画面追加（PWA）用。
 - `admin.html` … 利用者（メールアドレス）の管理の画面。Cloudflare Pages の `/admin`。データは必ず `textContent` で出す（innerHTML に入れない）。
 - `functions/` … Cloudflare Pages Functions。
@@ -75,6 +75,11 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - 積算が入っていないとき（GitHub Pages・手元）は簡易な数え方（`qtySum`：壁は割付図の数量＋スペーサー、天井は `ceilCalc`）。積算は壁のない作業データを開けないので、天井だけのときも簡易な数え方。
 - `test/quantity.mjs`：組み込んだ積算で数えた数が積算そのものと同じか（jsdom と本物の Chrome・公開先と同じ CSP）、保存が混ざらないか、外へ通信しないか。
 
+## 線分タップ（2026-11-27 から）
+- 道具「線分」（`trace`・J）：図面の線（`S.geo`）をタップすると、その直線（`trRun`：同じ直線上で切れた線はつなぐ）を測り、両端を入隅・出隅・曲がり・突き当たり・切れ目・分かれ（`trEnd`）で示す。長押し・ダブルクリックは曲がり角をたどる（`trChain`。一周で面積）。結果は普通の距離・連続線・面積（`m.tr` に両端の様子）。
+- 入隅・出隅は、近くの平行な線（壁のもう片方の面、`trBody`）の側で決める。許す誤差は図面の座標（pt）で `TRT`。マウスを乗せたときの表示は線ごとに控える（`trPreview`）。
+- `test/trace.mjs`：作り物の図面（壁厚120の部屋・T字・L字・開口）で確かめる。
+
 ## 動作確認
 - VS Code の Live Server で `index.html` を開く（右下の「Go Live」→ http://127.0.0.1:5500/ ）。
 - 確認の基本: PDFを開く → 縮尺が自動で入る → 距離/連続線/面積/円弧を計測 → 🧱壁の一括設定 → 展開図 → 書き出し。
@@ -84,6 +89,7 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
   - `node test/layout.mjs`：割付の条件・キワのカット寸法・端の寸法・展開図の画面。割付・展開図を変えたら流す。
   - `node test/ceiling.mjs`：面積から天井の数量・CH の読み取り・設定欄と集計の画面、積算（dxf-takeoff）と同じ数になるか。天井の計算・積算への書き出しを変えたら流す。
   - `node test/quantity.mjs`：数量のまとめが積算と同じ数か（本物の Chrome も使う）。数量のまとめ・積算への書き出し・fbbuild を変えたとき、積算（dxf-takeoff）を直したときに流す。
+  - `node test/trace.mjs`：線分タップ（直線・両端・たどる・画面）。線分タップ・図面の線の読み取りを変えたら流す。
   - `node test/security.mjs`：ログインの証明・入口・利用者の管理 API・管理の画面・初期設定の台本（にせの Cloudflare）・アプリの安全の直し。functions/・admin.html・tools/・ライブラリ・ログイン関係を変えたら流す。
   - `node tools/fbbuild.mjs && node test/firebase.mjs`：Firebase のエミュレータと Chrome で、決まり・登録・名簿・外す・電波なし。firebase/・名簿・ログインを変えたら流す（Java が要る）。
   - `node test/ipad.mjs`：iPad の条件で、線の多い図面を開く・拡大・ページ移動・区画の控え（一致・取り違え・開き直し）・落ちた後の軽い表示。`ENGINE=webkit` でも流す（Chrome だけでは Safari の遅さに気付けない）。PDF の読み込み・描画・線の読み取り・縮小画像を変えたら流す。

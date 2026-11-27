@@ -509,6 +509,7 @@ header .grp{border-right:1px solid var(--line)} header .grp:last-child{border-ri
     <button class="tb" data-t="area" title="ポリゴン面積 (A) — 始点クリック/Enterで閉じる"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12.5l2-9 7 1.5 3 6-5 2.5z" fill="currentColor" fill-opacity=".25"/></svg><span class="lbl">面積</span><kbd>A</kbd></button>
     <button class="tb" data-t="rect" title="矩形面積 (R) — 対角2点"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="4" width="11" height="8" fill="currentColor" fill-opacity=".25"/></svg><span class="lbl">矩形</span><kbd>R</kbd></button>
     <button class="tb" data-t="wall" title="壁 (W) — 壁芯を連続線で入力、Enter/ダブルクリックで確定。高さ・仕様・開口を設定して面積と割付図"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12V5h12v7" /><path d="M2 12h12" stroke-width="3"/></svg><span class="lbl">壁</span><kbd>W</kbd></button>
+    <button class="tb" data-t="trace" title="線分タップ (J) — 図面の線をタップでその直線を自動計測（入隅・出隅・切れ目まで）。長押し／ダブルクリックで曲がり角をたどって連続で計測"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12h8V4"/><circle cx="6" cy="12" r="1.6" fill="currentColor"/><path d="M12.5 4.5l1.5-1.5M10 2v-1"/></svg><span class="lbl">線分</span><kbd>J</kbd></button>
     <button class="tb" data-t="arc" title="円弧・半径 (E) — 図面の円弧/円をクリックで自動、または始点→通過点→終点"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 13A10.5 10.5 0 0 1 13 2.5"/><path d="M13 13L5.5 5.5" stroke-dasharray="2 1.6"/><circle cx="13" cy="13" r="1.1" fill="currentColor"/></svg><span class="lbl">円弧</span><kbd>E</kbd></button>
     <button class="tb" data-t="angle" title="角度 (G) — 点・頂点・点"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 13H2l9-9"/><path d="M6.5 13a4.5 4.5 0 0 0-1.3-3.2"/></svg><span class="lbl">角度</span><kbd>G</kbd></button>
   </div>
@@ -722,9 +723,9 @@ function valueOf(m){
   const pts=geomPts(m);
   if (wallOk(m)){ const c=computeWall(m); return { main:'壁 '+fmtMm2(c.net), sub:'L '+fmtMm(c.Ltot)+' × H '+(+m.wall.h).toLocaleString()+(c.ops.length?` ／ 開口${c.ops.length}`:'')+(c.sys?' ／ '+c.sys.name:'') }; }
   switch(m.kind){
-    case 'dist': return { main: fmtLen(d2(pts[0],pts[1]), m.page), sub: dxdy(pts[0],pts[1],m.page) };
+    case 'dist': return { main: fmtLen(d2(pts[0],pts[1]), m.page), sub: (m.tr? trTxt(m.tr) : dxdy(pts[0],pts[1],m.page)) };
     case 'poly': if (m.run){ const sg=runSegs(m); return { main: fmtLen(pathLen(m,false), m.page), sub: sg.map(x=>x.arc? 'R'+fmtLen(x.r,m.page).replace(/\s*mm$/,'') : '直線').join(' → ') }; }
-      return { main: fmtLen(pathLen(m,false), m.page), sub: (pts.length-1)+' 区間'+(hasArcs(m)?`（円弧${Object.keys(m.arcs).length}）`:'') };
+      return { main: fmtLen(pathLen(m,false), m.page), sub: (pts.length-1)+' 区間'+(hasArcs(m)?`（円弧${Object.keys(m.arcs).length}）`:'')+trTag(m) };
     case 'area': case 'rect': return { main: fmtArea(shapeArea(m), m.page), sub: '周長 '+fmtLen(pathLen(m,true), m.page)+(hasArcs(m)?` ／ 円弧${Object.keys(m.arcs).length}`:'')+ceilTag(m) };
     case 'arc': { const A=arcInfo(m); return A? { main:'R '+fmtLen(A.r,m.page), sub:'弧長 '+fmtLen(A.len,m.page)+' ／ '+(Math.abs(A.sweep)*180/Math.PI).toFixed(1)+'°' } : {main:'–',sub:''}; }
     case 'circle': { const r=d2(pts[0],pts[1]); return { main:'R '+fmtLen(r,m.page), sub:'φ '+fmtLen(2*r,m.page)+' ／ 面積 '+fmtArea(Math.PI*r*r,m.page)+ceilTag(m) }; }
@@ -1469,7 +1470,7 @@ function drawOv(){
   S._wno=wallNoMap();
   for (const m of pageMeas()) drawMeas(c, m, m.id===S.sel, m.id===S.hover);
   for (const m of pageMeas()) if (hasArcs(m)) drawRunMarks(c, m, colOf(m), m.id===S.sel); else if (m.kind==='arc' && m.sw && m.pts.length===3) drawSwMarks(c, m, colOf(m));
-  drawNoteOverlay(c); drawFlashAndLinks(c);
+  drawNoteOverlay(c); drawFlashAndLinks(c); drawTrace(c);
   if (S.draft){
     const pts=[...S.draft.pts]; if (S.cursor) pts.push(S.cursor);
     const d=S.draft, arcs={...(d.arcs||{})}; const prev=d.pts[d.pts.length-1];
@@ -1478,7 +1479,7 @@ function drawOv(){
     if (d.pendingMid){ const q=w2s(d.pendingMid); c.beginPath(); c.arc(q.x,q.y,4,0,TAU); c.fillStyle='#e83e8c'; c.fill(); }
   }
   // snap marker
-  if (S.snap && !S.snap.ortho && S.cursor && isMeasureTool()){
+  if (S.snap && !S.snap.ortho && S.cursor && isMeasureTool() && S.tool!=='trace'){
     const p=w2s(S.snap), t=S.snap.type; c.save(); c.strokeStyle='#ff8a00'; c.lineWidth=2;
     c.beginPath();
     if (t.startsWith('端点')||t.startsWith('計測点')) c.rect(p.x-6,p.y-6,12,12);
@@ -1498,7 +1499,7 @@ function drawOv(){
     c.beginPath(); c.arc(p.x,p.y,1.6,0,Math.PI*2); c.fillStyle='#e0245e'; c.fill(); c.restore();
   }
 }
-function isMeasureTool(){ return (['dist','poly','area','rect','angle','calib','wall','arc'].includes(S.tool) || S.openPick) && !S.space; }
+function isMeasureTool(){ return (['dist','poly','area','rect','angle','calib','wall','arc','trace'].includes(S.tool) || S.openPick) && !S.space; }
 function label(c, text, x, y, color, sub){
   c.save(); c.font='600 12px '+getComputedStyle(document.body).fontFamily;
   const lines=[text]; if (sub) lines.push(sub);
@@ -1593,6 +1594,7 @@ const HINTS = {
   poly:'点を順にクリック → Enter／ダブルクリック／右クリックで確定、Backspaceで1点戻す',
   area:'頂点を順にクリック → 始点クリック／Enter／ダブルクリックで閉じる。円弧の辺は「⌒円弧」(Q)をONにして終点をクリック（図面の円弧に自動追従）',
   rect:'対角の2点をクリック',
+  trace:'線分：図面の線をタップ（クリック）すると、その直線を端から端まで計測（入隅・出隅・突き当たり・切れ目で止まる）。長押し／ダブルクリックで曲がり角をたどって連続で計測（一周すると面積）',
   angle:'1点目 → 頂点 → 3点目 をクリック',
   arc:'図面の円弧・円をクリック → 半径を自動計測（途中でRが変わる・直線になる所は切替点で区切って区間ごとに計測）。手動は 始点 → 円弧上の点 → 終点',
   pen:'ペン：なぞって書く。長押しで図形に補正／なぐり書きで消去。Apple Pencil使用時は指で移動',
@@ -1609,7 +1611,7 @@ const HINTS = {
 };
 function setTool(t){
   if (S.draft && S.draft.kind!==t) finishDraft(true);
-  S.tool=t; S.draft=null;
+  S.tool=t; S.draft=null; S.trPrev=null;
   if (S.editing) commitText(); if (t!=='lasso' && S.tool!==t) clearSel(); S.eraserPos=null;
   if (isNoteTool(t) && S.mode!=='note'){ S.mode='note'; app.classList.add('notemode'); document.querySelectorAll('#modeSeg button').forEach(b=>b.classList.toggle('on', b.dataset.m==='note')); $('#tools').style.display='none'; $('#ntools').style.display=''; }
   if (isNoteTool(t)) lastNoteTool=t; else if (t!=='pan') lastMeasureTool=t;
@@ -1727,7 +1729,10 @@ ov.addEventListener('pointerdown', e=>{
   }
   // measuring
   if (e.pointerType==='touch'){ // 指で隠れないよう、離した位置に点を置く（ルーペで確認しながら微調整）
-    S.touchPlace={id:e.pointerId}; touchCursor(sp); return; }
+    S.touchPlace={id:e.pointerId, t0:performance.now()}; touchCursor(sp);
+    if (S.tool==='trace'){ const id=e.pointerId; setTimeout(()=>{ const tp=S.touchPlace; if (tp && tp.id===id && !tp.armed){ tp.long=true; trPreview(S.rawCursor, true); drawOv(); if (navigator.vibrate) try{ navigator.vibrate(15); }catch(_){} } }, 550); }
+    return; }
+  if (S.tool==='trace'){ const w=s2w(sp), now=performance.now(), L=TRC; if (L.t && now-L.t<380 && d2(L.sp,sp)<10 && L.single){ L.t=0; undo(); trTap(w,true); return; } const m=trTap(w,false); TRC.t=now; TRC.sp=sp; TRC.single=!!m; return; }
   const now=performance.now();
   const prev = S.draft && S.draft.pts.length ? S.draft.pts[S.draft.pts.length-1] : null;
   const p = resolvePoint(s2w(sp), prev);
@@ -1740,6 +1745,7 @@ function touchCursor(sp, fromEdge){
   const w=s2w(sp); S.rawCursor=w;
   const prev = S.draft && S.draft.pts.length ? S.draft.pts[S.draft.pts.length-1] : null;
   S.cursor=resolvePoint(w, prev); $('#ss').textContent = S.snap? S.snap.type : (S.snapOn?'—':'OFF');
+  if (S.tool==='trace'){ S.cursor=w; trPreview(w, !!(S.touchPlace&&S.touchPlace.long)); }
   drawOv(); drawLoupe(sp);
 }
 function drawLoupe(sp){
@@ -1756,7 +1762,9 @@ function drawLoupe(sp){
   c.restore();
 }
 function hideLoupe(){ $('#loupe').style.display='none'; }
+const TRC={t:0, sp:null, single:false};
 function placeTouch(){
+  if (S.tool==='trace'){ const tp=S.touchPlace, w=S.rawCursor; S.touchPlace=null; hideLoupe(); if (w) trTap(w, !!(tp&&tp.long)); S.cursor=null; drawOv(); return; }
   const p=S.cursor; S.touchPlace=null; hideLoupe(); if (!p) return;
   if (S.openPick){ handleOpenPick(p); return; }
   addPoint(p);
@@ -1783,6 +1791,7 @@ ov.addEventListener('pointermove', e=>{
     const prev = S.draft && S.draft.pts.length ? S.draft.pts[S.draft.pts.length-1] : null;
     S.rawCursor=w; S.cursor=resolvePoint(w, prev);
     $('#ss').textContent = S.snap? S.snap.type : (S.snapOn?'—':'OFF');
+    if (S.tool==='trace'){ S.cursor=w; S.snap=null; trPreview(w, e.shiftKey); }
     drawOv();
   }
 });
@@ -1835,7 +1844,7 @@ function endPointer(e){
   if (S.drag){ if (!S.drag.moved) S.undo.pop(); else { save(); refreshList(); } S.drag=null; if (e.pointerType!=='mouse'){ hideLoupe(); S.cursor=null; drawOv(); } }
 }
 ov.addEventListener('pointerup', endPointer); ov.addEventListener('pointercancel', endPointer);
-ov.addEventListener('pointerleave', ()=>{ S.cursor=null; S.snap=null; S.eraserPos=null; drawOv(); });
+ov.addEventListener('pointerleave', ()=>{ S.cursor=null; S.snap=null; S.eraserPos=null; S.trPrev=null; drawOv(); });
 ov.addEventListener('contextmenu', e=>e.preventDefault());
 ov.addEventListener('dblclick', e=>e.preventDefault());
 ov.addEventListener('wheel', e=>{ if(!S.W) return; e.preventDefault(); const sp=evPt(e);
@@ -1859,7 +1868,7 @@ window.addEventListener('keydown', e=>{
   if (e.ctrlKey||e.metaKey||e.altKey) return;
   const nmap={b:'pen',m:'hl',x:'eraser',u:'lasso',t:'text',k:'stamp',n:'note',z:'laser'};
   if (nmap[k.toLowerCase()]) { if (S.mode!=='note') setMode('note'); setTool(nmap[k.toLowerCase()]); return; }
-  const map={v:'select',h:'pan',d:'dist',l:'poly',a:'area',r:'rect',g:'angle',w:'wall',e:'arc'};
+  const map={v:'select',h:'pan',d:'dist',l:'poly',a:'area',r:'rect',g:'angle',w:'wall',e:'arc',j:'trace'};
   if (map[k.toLowerCase()]) { const t=map[k.toLowerCase()]; if (S.mode!=='measure' && t!=='pan') setMode('measure'); setTool(t); return; }
   switch(k){
     case 'Escape': if (S.selA.size||S.selM.size){ clearSel(); drawOv(); break; } if ($('#aipanel').classList.contains('show')){ $('#aipanel').classList.remove('show'); break; } if (S.openPick){ S.openPick=null; setHint(); drawOv(); } else if (S.draft){ S.draft=null; drawOv(); } else { S.sel=null; refreshList(); drawOv(); } break;
@@ -2052,6 +2061,7 @@ function showHelp(){
    <kbd>A</kbd><span>ポリゴン面積・周長 — 始点クリック／Enterで閉じる</span>
    <kbd>R</kbd><span>矩形面積（対角2点）</span>
    <kbd>G</kbd><span>角度（点→頂点→点）</span>
+   <kbd>J</kbd><span>線分タップ：図面の線をタップでその直線を自動計測（細かく切れた線もつなぐ・入隅／出隅／切れ目を表示）。長押し・ダブルクリックで曲がり角をたどって連続で計測</span>
    <kbd>E</kbd><span>円弧・半径：図面の円弧／円をクリックで半径・弧長・中心角（円は面積）を自動計測。手動は始点→通過点→終点</span>
    <kbd>Q</kbd><span>連続線・面積・壁の作図中に「次の辺を円弧」。図面の円弧なら終点クリックだけで追従、なければ通過点→終点。確定後は辺中央の◇ドラッグでも円弧化</span>
    <kbd>ノート</kbd><span>上の「✏️ノート」で手書きツールに切替：ペン(B)・マーカー(M)・消しゴム(X)・投げ縄(U)・テキスト(T)・スタンプ(K)・付箋(N)・テープ・レーザー(Z)・画像</span>
@@ -3953,6 +3963,7 @@ function cleanState(j){
       if (m.wall!=null){ if (!isObj(m.wall)) delete m.wall; else { const W=m.wall; W.h = Number.isFinite(+W.h)? +W.h : 0; if (!Array.isArray(W.openings)) W.openings=[];
         W.openings=W.openings.filter(o=>isObj(o) && [o.s,o.w,o.h].every(v=>Number.isFinite(+v))); if (typeof W.sys!=='string') W.sys=''; normLay(W); } }
       if (m.ceil!=null){ if (!isObj(m.ceil)) delete m.ceil; else normCeil(m.ceil); }
+      if (m.tr!=null && !(isObj(m.tr) && TR_END.includes(m.tr.a) && TR_END.includes(m.tr.b))) delete m.tr; else if (m.tr) m.tr={a:m.tr.a, b:m.tr.b};
       return true; }); }
   if (isObj(j.scales)) for (const k in j.scales){ const sc=j.scales[k]; if (pg(k) && isObj(sc) && Number.isFinite(+sc.mmPerUnit) && +sc.mmPerUnit>0){ sc.mmPerUnit=+sc.mmPerUnit; sc.label = typeof sc.label==='string'? sc.label : '1/'+Math.round(sc.mmPerUnit/(25.4/72)); out.scales[k]=sc; } else out.dropped++; }
   if (isObj(j.rots)) for (const k in j.rots){ const r=+j.rots[k]; if (pg(k) && [0,90,180,270].includes(r)) out.rots[k]=r; }
@@ -4835,6 +4846,91 @@ function segsAt(g, pt, tol){ const out=[]; const [i0,j0]=g.cell(pt.x-tol,pt.y-to
   for (let j=j0;j<=j1;j++) for (let i=i0;i<=i1;i++){ const a=g.grid.get(j*g.gx+i); if (a) for (const s of a){ if (seen.has(s)) continue; seen.add(s);
     const p={x:sg[s*4],y:sg[s*4+1]}, q={x:sg[s*4+2],y:sg[s*4+3]}; if (d2(p,pt)<=tol) out.push({s,far:q}); else if (d2(q,pt)<=tol) out.push({s,far:p}); } }
   return out; }
+// ===================== 線分タップ：図面の線をタップして、その直線（またはつながり）を測る =====================
+// 線の座標は図面（PDF）の座標＝ポイント。許す誤差もポイント（0.35pt≒0.12mm）。CAD から出した線は端がほぼ一致する
+const TRT={on:0.35, gap:0.6, end:1.0, ang:Math.sin(1*Math.PI/180), turn:Math.sin(20*Math.PI/180)};
+const TR_END=['入隅','出隅','曲がり','突き当たり','切れ目','分かれ'];
+function trSegs(g, p, r){ const out=[], seen=new Set(); const [i0,j0]=g.cell(p.x-r,p.y-r), [i1,j1]=g.cell(p.x+r,p.y+r); for (let j=j0;j<=j1;j++) for (let i=i0;i<=i1;i++){ const a=g.grid.get(j*g.gx+i); if (a) for (const s of a) if (!seen.has(s)){ seen.add(s); out.push(s); } } return out; }
+const trXY=(g,s)=>{ const q=g.segs; return [q[s*4],q[s*4+1],q[s*4+2],q[s*4+3]]; };
+function trPick(g, p, rPx){ const r=rPx/S.zoom; let best=null;
+  for (const s of trSegs(g,p,r)){ const [x1,y1,x2,y2]=trXY(g,s), dx=x2-x1, dy=y2-y1, l=dx*dx+dy*dy; if (l<1e-6) continue; let t=((p.x-x1)*dx+(p.y-y1)*dy)/l; t=Math.max(0,Math.min(1,t)); const d=Math.hypot(x1+t*dx-p.x, y1+t*dy-p.y); if (d>r) continue; const sc=d - Math.min(Math.sqrt(l),200)*0.0005; if (!best||sc<best.sc) best={s,sc}; }
+  return best? best.s : null; }
+// 直線：s を含み、同じ直線上でつながる線をまとめる
+function trRun(g, s0){
+  const [x1,y1,x2,y2]=trXY(g,s0), L=Math.hypot(x2-x1,y2-y1), u={x:(x2-x1)/L, y:(y2-y1)/L}, n={x:-u.y, y:u.x}, O={x:x1,y:y1};
+  let t0=0, t1=L; const used=new Set([s0]); const pt=t=>({x:O.x+u.x*t, y:O.y+u.y*t});
+  const onLine=q=>{ const [a,b,c,d]=trXY(g,q), ql=Math.hypot(c-a,d-b); if (ql<1e-6) return null; if (Math.abs(((c-a)*u.y-(d-b)*u.x)/ql)>TRT.ang) return null;
+    if (Math.abs((a-O.x)*n.x+(b-O.y)*n.y)>TRT.on || Math.abs((c-O.x)*n.x+(d-O.y)*n.y)>TRT.on) return null; const ta=(a-O.x)*u.x+(b-O.y)*u.y, tb=(c-O.x)*u.x+(d-O.y)*u.y; return [Math.min(ta,tb), Math.max(ta,tb)]; };
+  for (const dir of [1,-1]) for (let k=0;k<2000;k++){ const E=pt(dir>0? t1 : t0); let grew=false;
+    for (const q of trSegs(g, E, TRT.gap+TRT.on)){ if (used.has(q)) continue; const r=onLine(q); if (!r) continue;
+      if (dir>0 && r[0]<=t1+TRT.gap && r[1]>t1+1e-6){ t1=r[1]; used.add(q); grew=true; } else if (dir<0 && r[1]>=t0-TRT.gap && r[0]<t0-1e-6){ t0=r[0]; used.add(q); grew=true; } else if (r[0]>=t0-TRT.gap && r[1]<=t1+TRT.gap) used.add(q); }
+    if (!grew) break; }
+  return {O, u, n, t0, t1, used, A:pt(t0), B:pt(t1), len:t1-t0};
+}
+// 壁の側：近くにある平行な線（壁のもう片方の面）が、どちら側にあるか（+1＝n の側、-1＝反対、0＝分からない）
+function trBody(g, R, pg){ const sc=scaleOf(pg), k= sc && sc.mmPerUnit>=PT_MM*10? sc.mmPerUnit : PT_MM*100,   /* 縮尺がない・1/10 より大きい（自動判定のずれ）ときは 1/100 とみなす */ lo=30/k, hi=Math.min(450/k, 15/PT_MM); let best=null;
+  for (const f of [0.25,0.5,0.75]){ const P={x:R.O.x+R.u.x*(R.t0+(R.t1-R.t0)*f), y:R.O.y+R.u.y*(R.t0+(R.t1-R.t0)*f)}, tp=R.t0+(R.t1-R.t0)*f;
+    for (const q of trSegs(g, P, hi)){ if (R.used.has(q)) continue; const [a,b,c,d]=trXY(g,q), ql=Math.hypot(c-a,d-b); if (ql<1e-6 || Math.abs(((c-a)*R.u.y-(d-b)*R.u.x)/ql)>TRT.ang*3) continue;
+      const off=(a-R.O.x)*R.n.x+(b-R.O.y)*R.n.y; if (Math.abs(off)<lo || Math.abs(off)>hi) continue; const ta=(a-R.O.x)*R.u.x+(b-R.O.y)*R.u.y, tb=(c-R.O.x)*R.u.x+(d-R.O.y)*R.u.y; if (tp<Math.min(ta,tb)-1e-6 || tp>Math.max(ta,tb)+1e-6) continue;
+      if (!best || Math.abs(off)<Math.abs(best)) best=off; } }
+  return best? Math.sign(best) : 0; }
+// 端の様子：end＝1 なら B 側、0 なら A 側
+function trEnd(g, R, end, body){
+  const E= end? R.B : R.A, out= end? R.u : {x:-R.u.x, y:-R.u.y}; let L=[], T=false;
+  for (const q of trSegs(g, E, TRT.end*2)){ if (R.used.has(q)) continue; const [a,b,c,d]=trXY(g,q), ql=Math.hypot(c-a,d-b); if (ql<TRT.end*1.5) continue;
+    const sn=Math.abs(((c-a)*R.u.y-(d-b)*R.u.x)/ql); if (sn<TRT.turn) continue;   // ほぼ同じ向き（続く線・重なる線）は曲がりではない
+    const dA=Math.hypot(a-E.x,b-E.y), dB=Math.hypot(c-E.x,d-E.y);
+    if (dA<=TRT.end || dB<=TRT.end){ const f= dA<=dB? {x:c,y:d} : {x:a,y:b}, v={x:(f.x-E.x)/ql, y:(f.y-E.y)/ql}; L.push({q, v, ql}); continue; }
+    const dx=c-a, dy=d-b, t=((E.x-a)*dx+(E.y-b)*dy)/(ql*ql); if (t>0 && t<1 && Math.hypot(a+t*dx-E.x, b+t*dy-E.y)<=TRT.end) T=true; }
+  if (T && !L.length) return {type:'突き当たり', E};
+  if (!L.length) return {type:'切れ目', E};
+  L.sort((x,y)=>y.ql-x.ql); const main=L[0], other=L.slice(1).filter(x=>x.ql>main.ql*0.3 && (x.v.x*main.v.x+x.v.y*main.v.y)<0.98);
+  if (other.length || T) return {type:'分かれ', E, v:main.v, q:main.q};
+  const type= !body? '曲がり' : ((main.v.x*R.n.x+main.v.y*R.n.y)*body>0? '出隅' : '入隅');
+  return {type, E, v:main.v, q:main.q};
+}
+// 2本の直線の交わる所（曲がり角の点を、線の太さのずれに左右されず決める）
+function trCross(R1, R2, fb){ const den=R1.u.x*R2.u.y-R1.u.y*R2.u.x; if (Math.abs(den)<1e-6) return fb; const dx=R2.O.x-R1.O.x, dy=R2.O.y-R1.O.y, t=(dx*R2.u.y-dy*R2.u.x)/den; const p={x:R1.O.x+R1.u.x*t, y:R1.O.y+R1.u.y*t}; return Math.hypot(p.x-fb.x,p.y-fb.y)<TRT.end*3? p : fb; }
+// 1本：タップした所の直線
+function trSingle(g, p, rPx, pg){ const s=trPick(g,p,rPx); if (s==null) return null; const R=trRun(g,s), body=trBody(g,R,pg); return {pts:[R.A,R.B], ends:[trEnd(g,R,0,body).type, trEnd(g,R,1,body).type], runs:[R], closed:false}; }
+// つながり：曲がり角をたどる（分かれ・突き当たり・切れ目で止まる。一周したら面積）
+function trChain(g, p, rPx, pg){ const s=trPick(g,p,rPx); if (s==null) return null; const R0=trRun(g,s), allUsed=new Set(R0.used);
+  const walk=(R,end)=>{ const pts=[], runs=[]; let cur=R, ce=end, typ='切れ目';
+    for (let k=0;k<300;k++){ const body=trBody(g,cur,pg), e=trEnd(g,cur,ce,body); typ=e.type; if (e.type!=='入隅' && e.type!=='出隅' && e.type!=='曲がり') break;
+      const N=trRun(g,e.q); if (N.used.has(s)){ pts.push(trCross(cur,N,e.E)); typ='一周'; break; } if ([...N.used].some(x=>allUsed.has(x))){ typ='分かれ'; break; } const nearA=Math.hypot(N.A.x-e.E.x,N.A.y-e.E.y), nearB=Math.hypot(N.B.x-e.E.x,N.B.y-e.E.y);
+      if (Math.min(nearA,nearB)>TRT.end*2){ typ='分かれ'; break; }   // 角の先で線が延びている（十字）
+      const c=trCross(cur,N,e.E); pts.push(c); for (const x of N.used) allUsed.add(x); runs.push(N); cur=N; ce= nearA<nearB? 1 : 0; }
+    const last= ce? cur.B : cur.A; return {pts, last, typ, runs}; };
+  const F=walk(R0,1);
+  if (F.typ==='一周'){ const out=[]; for (const q of F.pts) if (!out.length || Math.hypot(q.x-out[out.length-1].x,q.y-out[out.length-1].y)>TRT.end) out.push(q); return {pts:out, ends:null, runs:[R0,...F.runs], closed:true}; }
+  const B=walk(R0,0);
+  const head=[B.last, ...B.pts.slice().reverse()], tail=[...F.pts, F.last];
+  let pts=[...head, ...tail]; const closed= F.typ==='一周' || B.typ==='一周';
+  if (closed){ // 一周：始めの直線の両端は角の点で置き換える
+    pts=[...B.pts.slice().reverse(), ...F.pts]; const out=[]; for (const q of pts) if (!out.length || Math.hypot(q.x-out[out.length-1].x,q.y-out[out.length-1].y)>TRT.end) out.push(q); if (out.length>2 && Math.hypot(out[0].x-out[out.length-1].x,out[0].y-out[out.length-1].y)<=TRT.end*2) out.pop(); pts=out; }
+  return {pts, ends: closed? null : [B.typ, F.typ], runs:[R0,...F.runs,...B.runs], closed};
+}
+const trGeo=()=> S.geo && S.geoPage===S.page? S.geo : null;
+const _trMemo={g:null, m:new Map()};
+function trPreview(w, chain){ const g=trGeo(); if (!g || !w){ S.trPrev=null; return; } if (_trMemo.g!==g){ _trMemo.g=g; _trMemo.m.clear(); }
+  const rp=coarse()?22:12, s=trPick(g,w,rp); if (s==null){ S.trPrev=null; return; } const k=s+'|'+(chain?1:0)+'|'+S.page; let r=_trMemo.m.get(k);
+  if (r===undefined){ r= chain? trChain(g,w,rp,S.page) : trSingle(g,w,rp,S.page); if (_trMemo.m.size>400) _trMemo.m.clear(); _trMemo.m.set(k,r); }
+  S.trPrev= r? Object.assign({}, r, {chain:!!chain}) : null; }
+function trTap(w, chain){
+  const g=trGeo(); if (!g){ toast(S.isPdf? '図面の線を読み込み中か、この図面には線の情報がありません（CAD から出した PDF で使えます）' : '画像の図面には線の情報がないため使えません（CAD から出した PDF で使えます）'); return null; }
+  const r= chain? trChain(g,w,coarse()?22:12,S.page) : trSingle(g,w,coarse()?22:12,S.page); if (!r || r.pts.length<2){ toast('ここに線が見つかりません。線の上をタップしてください'); return null; }
+  S.draft={kind: r.closed? 'area' : r.pts.length>2? 'poly' : 'dist', pts:r.pts.map(q=>({x:q.x,y:q.y})), arcs:{}}; finishDraft(); const m=selMeas(); if (!m) return null;
+  if (r.ends){ m.tr={a:r.ends[0], b:r.ends[1]}; save(); refreshList(); drawOv(); }
+  const v=valueOf(m); toast((r.closed? 'つながりを一周' : chain? 'つながりをたどって' : '直線')+'：'+v.main+(r.ends? '　'+trTxt(m.tr) : '')); S.trPrev=null; return m; }
+const trTxt=t=> t? '始点 '+t.a+'・終点 '+t.b : '';
+function trTag(m){ return m.tr? ' ／ '+trTxt(m.tr) : ''; }
+function drawTrace(c){
+  const P=S.trPrev; if (P && S.tool==='trace'){ const pts=P.pts.map(w2s); c.save(); c.lineCap='round'; c.lineJoin='round'; c.beginPath(); pts.forEach((q,i)=>i?c.lineTo(q.x,q.y):c.moveTo(q.x,q.y)); if (P.closed) c.closePath();
+    c.strokeStyle='rgba(255,138,0,.35)'; c.lineWidth=10; c.stroke(); c.strokeStyle='#ff8a00'; c.lineWidth=2; c.stroke();
+    if (P.ends) [[pts[0],P.ends[0]],[pts[pts.length-1],P.ends[1]]].forEach(([q,t])=>trLabel(c,q,t)); c.restore(); }
+  for (const m of pageMeas()) if (m.tr && m.pts.length>=2 && (m.id===S.sel || m.id===S.hover)){ const a=w2s(m.pts[0]), b=w2s(m.pts[m.pts.length-1]); trLabel(c,a,m.tr.a); trLabel(c,b,m.tr.b); }
+}
+function trLabel(c,q,t){ c.save(); c.font='700 11px '+FONT_STACK; const w=c.measureText(t).width+8; const col= t==='入隅'?'#1f77d4': t==='出隅'?'#d62728': t==='切れ目'?'#666': '#8a5a00'; c.fillStyle='rgba(255,255,255,.94)'; c.strokeStyle=col; c.lineWidth=1.2; c.beginPath(); c.rect(q.x+6,q.y-20,w,16); c.fill(); c.stroke(); c.fillStyle=col; c.fillText(t,q.x+10,q.y-8); c.beginPath(); c.arc(q.x,q.y,3.5,0,TAU); c.fill(); c.restore(); }
 // 端点 pt から dir の向きに、接線がつながる次の要素（別Rの円弧・直線）を探す
 function nextElem(g, pt, dir, tol, used, usedS){
   const C=g.curves; let best=null; const MAXA=12*Math.PI/180;
@@ -5011,7 +5107,7 @@ setTool('dist'); resize(); refreshAll();
 $('#hint').textContent='PDFまたは画像を開いてください（ドラッグ＆ドロップ可）';
 tryResume().catch(e=>{ console.warn('resume',e); busy(''); renderRecentCard(); });
 window.__S=S;
-window.__zk={LOWMEM, TL, tget, tkey, tilesReady, tilesNeeded, visTiles, renderHi, tilesDropFile, tilesErase, PJ, GeoHarvest, extractGeometry, pdfJob, readPdfBytes, crashedBefore, gotoPage, zoomAt, computeWall, wallRow, takeoffWork, wallList, refreshProps, openWallBatch, cutList, cutRows, edgeTxt, jointOffsets, ceilCalc, ceilTotals, qtySum, qtyCsvRows, openQtySum, qtyEngine, tkRows, TKC, ceilList, openCeilBatch, normCeil, chFromText, elevSVG, sheetSVG, openDevView, showElevation, newWallObj, LV};   // 試験用（test/link.mjs）
+window.__zk={LOWMEM, TL, tget, tkey, tilesReady, tilesNeeded, visTiles, renderHi, tilesDropFile, tilesErase, PJ, GeoHarvest, extractGeometry, pdfJob, readPdfBytes, crashedBefore, gotoPage, zoomAt, computeWall, wallRow, takeoffWork, wallList, refreshProps, openWallBatch, cutList, cutRows, edgeTxt, jointOffsets, trTap, trSingle, trChain, trPick, trRun, trBody, trEnd, buildIndex, setTool, ceilCalc, ceilTotals, qtySum, qtyCsvRows, openQtySum, qtyEngine, tkRows, TKC, ceilList, openCeilBatch, normCeil, chFromText, elevSVG, sheetSVG, openDevView, showElevation, newWallObj, LV};   // 試験用（test/link.mjs）
 })();
 </script>
 </body>
