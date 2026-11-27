@@ -81,5 +81,20 @@ ok(A.ceil.low==='GB-R12.5' && B.ceil.up==='RAB12' && B.ceil.H===3700, '選んだ
 ok(/岩綿吸音板/.test($('#cbSum').textContent), '合計の表にも反映される');
 const off=$('#cbTbl tr[data-id="'+B.id+'"] [data-on]'); off.checked=false; off.onchange({target:off}); await sleep(20); ok(B.ceil.on===false, '表から「数える」を外せる');
 $('#cbDef').checked=false; $('#cbDef').onchange({target:$('#cbDef')}); const C2=rect(0,30000,3000,3000); S.meas[1].push(C2); ok(!Z.ceilCalc(C2).on, '「面積を測ったら天井として数える」を外すと、新しい面積は数えない'); S.ceilDef.on=true;
+// ---- 数量のまとめ（壁と天井の下地材・ボード材） ----
+{ const W1={id:id++,page:1,kind:'dist',name:'壁A',inc:true,pts:[{x:0,y:50000},{x:5460,y:50000}],wall:{sys:'a2k',h:2700,base:'start',openings:[{mark:'SD-1',s:1000,w:900,h:2000}]}};
+  const W2={id:id++,page:1,kind:'dist',name:'壁B',inc:true,pts:[{x:0,y:60000},{x:4000,y:60000}],wall:{sys:'s12w',h:2700,base:'start',openings:[]}};
+  S.meas[1]=[W1,W2,rect(0,0,6000,5000,{ch:2400},'洋室'),rect(7000,0,9000,1800,{ch:2400,up:'RAB12'},'廊下')]; S.ceilDef.H=3600;
+  const Q=Z.qtySum('all'), cw=[W1,W2].map(m=>Z.computeWall(m)), row=(n,sp)=>Q.rows.find(r=>r.name===n&&(sp==null||r.spec===sp));
+  ok(Q.walls.length===2 && Q.ceils.length===2, '数量のまとめ：高さのある壁2本と天井2か所を数える');
+  const studs=cw.reduce((a,c)=>a+c.studs.filter(s=>['reg','end','corner'].includes(s.kind)).length,0); ok(row('スタッド（通し）') && row('スタッド（通し）').w===studs, `壁のスタッド（通し）は割付図の本数の合計（${studs}本）`);
+  const sheets=new Map(); for (const c of cw) for (const k of c.layers){ const L=c.boards[k], kk=L.board.n+'|'+L.bw+'×'+L.bl; sheets.set(kk,(sheets.get(kk)||0)+L.sheets); }
+  ok([...sheets].every(([kk,n])=>{ const [nm,sp]=kk.split('|'); const r=row(nm,sp); return r && r.w===n; }), '壁のボードは、ボード・寸法ごとに割付図の枚数の合計');
+  const ct=Z.ceilTotals(Q.ceils); ok(ct.every(l=>{ const r=Q.rows.find(x=>x.name===l.name && x.unit===l.unit && (x.spec===l.spec || x.spec==='910×1820'&&l.spec==='3×6')); return r && Math.abs(r.c-l.q)<1e-9; }), '天井の材料は、天井の集計と同じ数');
+  ok(row('普通せっこうボード GB-R 9.5mm','910×1820') && row('岩綿吸音板 RAB'), '天井のボードは寸法を 910×1820 で書き、岩綿吸音板は m²');
+  Z.openQtySum(); await sleep(20); const body=$('#qsBody').innerHTML;
+  ok(/下地材/.test(body) && /ボード材/.test(body) && /壁の下地/.test(body) && /天井の下地/.test(body) && /壁種ごとの内訳/.test(body) && !/NaN|undefined/.test(body), '画面：下地材（壁・天井の見出し）・ボード材・壁種ごとの内訳が出る');
+  const csv=Z.qtyCsvRows(Q); ok(csv[0].join()==='区分,材料,規格,壁,天井,合計,単位,張付面積(m²)' && csv.length===Q.rows.length+1, `CSV・コピーの表（${csv.length-1}行）`);
+  $('#bCancel').click(); }
 ok(!errs.length, '画面の操作でエラーが出ない'+(errs.length?'（'+errs[0]+'）':''));
 console.log(bad? `\n${bad}件 不合格` : '\nすべて合格'); process.exit(bad?1:0);

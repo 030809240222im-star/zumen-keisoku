@@ -9,7 +9,7 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - `index.html` … アプリ本体（HTML・CSS・JavaScript をこの1ファイルに収めている）。**ここが正本**。
 - `cmaps-ja.json` … 日本語PDFの文字を読むための CMap（base64）。通常は触らない。
 - `lib/` … pdf.js 3.11.174（`pdf.min.js`・`pdf.worker.min.js`）、pdf-lib 1.17.1、日本語以外の CMap（`cmaps/`）。npm の公式パッケージから取り出し、CDN と同じ中身であることを確かめた物。**外の CDN からは読まない**（Claude 上など lib/ が無いときだけ、改ざん検査 SRI 付きで CDN を使う）。版を変えるときは `index.html` の `LIBS` の `sri` を作り直す（`test/security.mjs` が一致を確かめる）。
-- `sw.js` … オフライン起動用 Service Worker。**index.html を変えたら `VER` の番号を1つ上げる**（例 zumen-v17 → zumen-v18）。
+- `sw.js` … オフライン起動用 Service Worker。**index.html を変えたら `VER` の番号を1つ上げる**（例 zumen-v18 → zumen-v19）。
 - `manifest.webmanifest` / `icon-*.png` / `apple-touch-icon.png` … ホーム画面追加（PWA）用。
 - `admin.html` … 利用者（メールアドレス）の管理の画面。Cloudflare Pages の `/admin`。データは必ず `textContent` で出す（innerHTML に入れない）。
 - `functions/` … Cloudflare Pages Functions。
@@ -67,6 +67,9 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - **決まりは材料積算（dxf-takeoff）の「天井の積算」（`ceLines`）と同じ**：関包スチール「天井標準使用数量」（100㎡あたり）×面積、ボードは面積÷1枚の面積（ボード倍率1）、ビス・ステープルは目安。面積は 0.001㎡ に丸めてから数える（作業データと同じ）。`test/ceiling.mjs` が積算と同じ数になるかを比べるので、積算の決まりが変わったらこちらも直す。
 - 吊りボルトの長さ＝階高−CH−スラブ厚 を切り上げ（最小300）。CH は手入力か、囲みの中の図面の文字（`chFromText`。CH=2,400 など）。分からなければ 1,000。
 - 積算へ書き出すと、数える面積は作業データの `summary.rooms` になる（階高は `settings.slab` に1つだけ）。積算は張り方・ボードを読まないので、標準と違うときは断りを出す。積算は壁のない作業データを開けないので、壁がないときは書き出さずに案内する。
+
+## 数量のまとめ（2026-11-27 から）
+- 「📋 数量」（`openQtySum`・`qtySum`）：壁（`wallMat`＝割付図の数量と同じ数え方）と天井（`ceilMat`＝`ceilCalc`）の下地材・ボード材・副資材を、材料・規格ごとに「壁・天井・合計」で出す。割増は入れない（正式な数量は材料積算）。`test/ceiling.mjs` が割付図・天井の集計と同じ数かを確かめる。
 
 ## 動作確認
 - VS Code の Live Server で `index.html` を開く（右下の「Go Live」→ http://127.0.0.1:5500/ ）。
