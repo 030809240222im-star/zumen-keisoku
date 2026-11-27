@@ -15,8 +15,26 @@ export function localConf(){
   return c;
 }
 export const rulesFor = owner => fs.readFileSync(path.join(FB, 'firestore.rules.tpl'), 'utf8').replace(/\r\n/g, '\n').split('__OWNER__').join(owner);
+// 積算（dxf-takeoff の材料積算）の画面を、アプリ本体に組み込む（「数量のまとめ」を積算と同じ決まりで出すため）。
+// dxf-takeoff は非公開なので、git・誰でも見える所（hosting）には置かず、名簿の人にだけ渡すアプリ本体（Firestore）にだけ入れる
+export const TK_SRC = process.env.DXF_TAKEOFF_ROOT ? path.join(process.env.DXF_TAKEOFF_ROOT, 'app', 'material-estimate.html') : path.resolve(ROOT, '../../dxf-takeoff/app/material-estimate.html');
+export function takeoffEngine(){
+  if (!fs.existsSync(TK_SRC)) return null;
+  let h = fs.readFileSync(TK_SRC, 'utf8').replace(/\r\n/g, '\n').replace(/<link[^>]+fonts\.googleapis[^>]*>/g, '');
+  if (!h.includes('// 起動：')) throw new Error('積算の画面に「// 起動：」が見つかりません（組み込めません）');
+  h = h.replace('// 起動：', () => 'window.__m={get S(){return S},compute,openFile,totals};\n// 起動：');
+  // 枠の中の保存は、枠の中だけ（このアプリの端末の保存を汚さない）。他の画面への知らせも止める
+  const pre = '<script>(()=>{const mk=()=>{const m=new Map();return{getItem:k=>m.has(k)?m.get(k):null,setItem:(k,v)=>{m.set(k,String(v))},removeItem:k=>{m.delete(k)},clear:()=>m.clear(),key:i=>[...m.keys()][i]??null,get length(){return m.size}}};for(const n of ["localStorage","sessionStorage"])try{Object.defineProperty(window,n,{value:mk(),configurable:true})}catch(e){}try{window.BroadcastChannel=undefined}catch(e){}})()</scr'+'ipt>';
+  const html = '<!doctype html><html lang="ja"><head><meta charset="utf-8">' + pre + '</head><body>' + h + '</body></html>';
+  return {ver: sha(h).slice(0, 12), html};
+}
+export function appHtml(){
+  let html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8').replace(/\r\n/g, '\n'); const tk = takeoffEngine();
+  if (tk){ const js = JSON.stringify(tk).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029'); const i = html.lastIndexOf('</body>'); if (i < 0) throw new Error('index.html に </body> がありません'); html = html.slice(0, i) + '<script>window.TAKEOFF_ENGINE=' + js + ';</scr'+'ipt>\n' + html.slice(i); }
+  return html;
+}
 export function appDoc(){
-  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8').replace(/\r\n/g, '\n'), h = sha(html), ver = h.slice(0, 16), parts = [];
+  const html = appHtml(), h = sha(html), ver = h.slice(0, 16), parts = [];
   // サロゲートペア（絵文字など）の間では切らない
   for (let i = 0; i < html.length;){ let e = Math.min(html.length, i + PART); const c = html.charCodeAt(e - 1); if (e < html.length && c >= 0xd800 && c <= 0xdbff) e--; parts.push(html.slice(i, e)); i = e; }
   return {ver, sha: h, n: parts.length, parts};
@@ -47,7 +65,7 @@ export function build(){
   fs.writeFileSync(path.join(OUT, 'firebase.json'), JSON.stringify({firestore: {rules: 'firestore.rules'}, hosting: {site: c.project, public: 'public', ignore: ['firebase.json', '**/.*'], headers: [{source: '**', headers: Object.entries(headersFor(c.project)).map(([key, value]) => ({key, value}))}]}}, null, 1));
   // アプリ本体が誰でも見える所に紛れていないか
   const walk = d => fs.readdirSync(d, {withFileTypes: true}).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]);
-  for (const f of walk(pub)) if (/\.(html|js)$/.test(f)){ const t = fs.readFileSync(f, 'utf8'); if (/W_ROWS|computeWall0|optimizeLayer/.test(t) || t.includes(c.owner)) throw new Error('誰でも見える所に、アプリ本体か管理者のメールが入っています：' + f); }
+  for (const f of walk(pub)) if (/\.(html|js)$/.test(f)){ const t = fs.readFileSync(f, 'utf8'); if (/W_ROWS|computeWall0|optimizeLayer|TAKEOFF_ENGINE|function ceLines|function bdLayout/.test(t) || t.includes(c.owner)) throw new Error('誰でも見える所に、アプリ本体か管理者のメールが入っています：' + f); }
   return {conf: c, app, pub};
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href){ try{ const r = build(); console.log(`組み立てた：アプリ本体 版 ${r.app.ver}（${r.app.n}つに分割）→ firebase/out/`); }catch(e){ console.error('止まりました：' + e.message); process.exit(1); } }
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href){ try{ const r = build(); console.log(`組み立てた：アプリ本体 版 ${r.app.ver}（${r.app.n}つに分割）${takeoffEngine()? '・積算を組み込み済み' : '・積算は見つからないので組み込まない（数量のまとめは簡易な数え方）'} → firebase/out/`); }catch(e){ console.error('止まりました：' + e.message); process.exit(1); } }

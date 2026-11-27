@@ -9,7 +9,7 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - `index.html` … アプリ本体（HTML・CSS・JavaScript をこの1ファイルに収めている）。**ここが正本**。
 - `cmaps-ja.json` … 日本語PDFの文字を読むための CMap（base64）。通常は触らない。
 - `lib/` … pdf.js 3.11.174（`pdf.min.js`・`pdf.worker.min.js`）、pdf-lib 1.17.1、日本語以外の CMap（`cmaps/`）。npm の公式パッケージから取り出し、CDN と同じ中身であることを確かめた物。**外の CDN からは読まない**（Claude 上など lib/ が無いときだけ、改ざん検査 SRI 付きで CDN を使う）。版を変えるときは `index.html` の `LIBS` の `sri` を作り直す（`test/security.mjs` が一致を確かめる）。
-- `sw.js` … オフライン起動用 Service Worker。**index.html を変えたら `VER` の番号を1つ上げる**（例 zumen-v18 → zumen-v19）。
+- `sw.js` … オフライン起動用 Service Worker。**index.html を変えたら `VER` の番号を1つ上げる**（例 zumen-v19 → zumen-v20）。
 - `manifest.webmanifest` / `icon-*.png` / `apple-touch-icon.png` … ホーム画面追加（PWA）用。
 - `admin.html` … 利用者（メールアドレス）の管理の画面。Cloudflare Pages の `/admin`。データは必ず `textContent` で出す（innerHTML に入れない）。
 - `functions/` … Cloudflare Pages Functions。
@@ -69,7 +69,11 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
 - 積算へ書き出すと、数える面積は作業データの `summary.rooms` になる（階高は `settings.slab` に1つだけ）。積算は張り方・ボードを読まないので、標準と違うときは断りを出す。積算は壁のない作業データを開けないので、壁がないときは書き出さずに案内する。
 
 ## 数量のまとめ（2026-11-27 から）
-- 「📋 数量」（`openQtySum`・`qtySum`）：壁（`wallMat`＝割付図の数量と同じ数え方）と天井（`ceilMat`＝`ceilCalc`）の下地材・ボード材・副資材を、材料・規格ごとに「壁・天井・合計」で出す。割増は入れない（正式な数量は材料積算）。`test/ceiling.mjs` が割付図・天井の集計と同じ数かを確かめる。
+- 「📋 数量」（`openQtySum`）：壁と天井の下地材・ボード材・副資材を、材料・規格ごとに「壁・天井・合計」で出す。
+- **積算と同じ決まり（2026-11-27 ユーザーの決定）**：Firebase の公開先では、材料積算の画面（`../../dxf-takeoff/app/material-estimate.html`）を `tools/fbbuild.mjs`（`takeoffEngine`・`appHtml`）がアプリ本体に組み込み（`window.TAKEOFF_ENGINE`）、見えない枠（`tkEngine`）で動かして、作業データ（`takeoffWork`）を読ませて数える（`qtyEngine`）。スペーサー・発注の長さ・開口補強・副資材・倍率（`TKC`）まで積算と同じ。
+- **dxf-takeoff は非公開**なので、積算のコードを git・hosting（誰でも見える所）に置かない（`fbbuild.mjs` が紛れ込みを止める）。枠の中の保存は枠の中だけ（localStorage を差し替え）。
+- 積算が入っていないとき（GitHub Pages・手元）は簡易な数え方（`qtySum`：壁は割付図の数量＋スペーサー、天井は `ceilCalc`）。積算は壁のない作業データを開けないので、天井だけのときも簡易な数え方。
+- `test/quantity.mjs`：組み込んだ積算で数えた数が積算そのものと同じか（jsdom と本物の Chrome・公開先と同じ CSP）、保存が混ざらないか、外へ通信しないか。
 
 ## 動作確認
 - VS Code の Live Server で `index.html` を開く（右下の「Go Live」→ http://127.0.0.1:5500/ ）。
@@ -79,6 +83,7 @@ PDF・画像の図面上で、距離・連続線・面積・円弧（R切替点�
   - `node test/link.mjs`：積算へ書き出した作業データを dxf-takeoff の材料積算（`../../dxf-takeoff/app/material-estimate.html`）で開き、同じ壁の面積が両方で同じかと、天井高＋100・画面の操作を確かめる。壁の計算・書き出し・壁の設定欄を変えたら流す。
   - `node test/layout.mjs`：割付の条件・キワのカット寸法・端の寸法・展開図の画面。割付・展開図を変えたら流す。
   - `node test/ceiling.mjs`：面積から天井の数量・CH の読み取り・設定欄と集計の画面、積算（dxf-takeoff）と同じ数になるか。天井の計算・積算への書き出しを変えたら流す。
+  - `node test/quantity.mjs`：数量のまとめが積算と同じ数か（本物の Chrome も使う）。数量のまとめ・積算への書き出し・fbbuild を変えたとき、積算（dxf-takeoff）を直したときに流す。
   - `node test/security.mjs`：ログインの証明・入口・利用者の管理 API・管理の画面・初期設定の台本（にせの Cloudflare）・アプリの安全の直し。functions/・admin.html・tools/・ライブラリ・ログイン関係を変えたら流す。
   - `node tools/fbbuild.mjs && node test/firebase.mjs`：Firebase のエミュレータと Chrome で、決まり・登録・名簿・外す・電波なし。firebase/・名簿・ログインを変えたら流す（Java が要る）。
   - `node test/ipad.mjs`：iPad の条件で、線の多い図面を開く・拡大・ページ移動・区画の控え（一致・取り違え・開き直し）・落ちた後の軽い表示。`ENGINE=webkit` でも流す（Chrome だけでは Safari の遅さに気付けない）。PDF の読み込み・描画・線の読み取り・縮小画像を変えたら流す。
